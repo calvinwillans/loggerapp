@@ -1,5 +1,5 @@
 // Set this to match where you host these files, e.g. "https://yourname.github.io/venue-logger-dialog"
-const BASE_URL = "https://YOUR-HOSTING-URL";
+const BASE_URL = "https://calvinwillans.github.io/loggerapp";
 const DIALOG_URL = BASE_URL + "/dialog.html";
 
 const INPUTS_SHEET = "Inputs";
