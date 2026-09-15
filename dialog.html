@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Venue Logger</title>
+  <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 14px;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    h1 { font-size: 14px; color: #1e3a8a; margin: 0 0 8px; }
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      font-size: 17px;
+      border: 2px solid #cbd5e1;
+      border-radius: 6px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #3b82f6; }
+    input[type="text"]:disabled { background: #f1f5f9; }
+    #status { margin-top: 8px; font-size: 12px; font-weight: 600; min-height: 16px; }
+    .status-ok { color: #16a34a; }
+    .status-err { color: #dc2626; }
+    .status-busy { color: #d97706; }
+    .hint { margin-top: 10px; font-size: 11px; color: #64748b; line-height: 1.4; }
+    code { background: #e2e8f0; padding: 1px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Venue Logger</h1>
+  <input type="text" id="logInput" autocomplete="off" placeholder="l1s ps ed14 ws" autofocus />
+  <div id="status">Ready.</div>
+  <div class="hint">
+    Type up to 4 codes separated by spaces, then press <b>Enter</b>. Use <code>-</code> to skip a field.
+    Drag this box anywhere - it stays open, so you can log as many entries as you need.
+  </div>
+  <script type="text/javascript" src="dialog.js"></script>
+</body>
+</html>
