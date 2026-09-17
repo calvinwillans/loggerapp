@@ -29,8 +29,8 @@ const MILESTONE_MAP = {
   C74: { b: "Base", c: "All Call", d: "", e: "Start of main act/game" },
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
-  F87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  F109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
+  C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
 };
 
 let dialog = null;
