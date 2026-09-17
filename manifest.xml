@@ -81,6 +81,25 @@
                     <FunctionName>openLogger</FunctionName>
                   </Action>
                 </Control>
+                <!-- Clears the hidden dedup record for "Event Checks" milestones only.
+                     Does NOT delete anything already written to Log - it just lets a
+                     cleared-and-repopulated (or newly templated) milestone cell log
+                     again the next time it's edited. -->
+                <Control xsi:type="Button" id="VenueLogger.ResetMilestonesButton">
+                  <Label resid="VenueLogger.ResetMilestonesButton.Label" />
+                  <Supertip>
+                    <Title resid="VenueLogger.ResetMilestonesButton.Label" />
+                    <Description resid="VenueLogger.ResetMilestonesButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>resetMilestoneLog</FunctionName>
+                  </Action>
+                </Control>
               </Group>
             </OfficeTab>
           </ExtensionPoint>
@@ -101,10 +120,12 @@
         <bt:String id="GetStarted.Title" DefaultValue="Get started with Venue Logger" />
         <bt:String id="VenueLogger.Group1Label" DefaultValue="Venue Logger" />
         <bt:String id="VenueLogger.OpenButton.Label" DefaultValue="Open Logger" />
+        <bt:String id="VenueLogger.ResetMilestonesButton.Label" DefaultValue="Reset Milestones" />
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="GetStarted.Description" DefaultValue="Click once to open the floating logger box. It stays open - type shorthand and press Enter." />
         <bt:String id="VenueLogger.OpenButton.Tooltip" DefaultValue="Opens a floating box for fast shorthand logging" />
+        <bt:String id="VenueLogger.ResetMilestonesButton.Tooltip" DefaultValue="Clears the record of which Event Checks milestones have already been logged, so cleared-and-repopulated cells will log again. Does not delete anything from Log." />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

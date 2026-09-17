@@ -310,6 +310,34 @@ function isNotApplicable(text) {
 }
 
 /**
+ * Ribbon button handler. Clears the hidden "_LoggerState" sheet that tracks
+ * which "Event Checks" milestone cells have already fired, so any cell that
+ * was cleared and repopulated (a correction) - or every cell, if the sheet
+ * was just wiped for a new event - will log again next time it's edited.
+ * Does NOT touch anything already written to Log.
+ */
+async function resetMilestoneLog(event) {
+  try {
+    await Excel.run(async (context) => {
+      const stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
+      stateSheet.load("isNullObject");
+      await context.sync();
+
+      if (!stateSheet.isNullObject) {
+        stateSheet.delete();
+        await context.sync();
+      }
+      // Nothing to do if it doesn't exist yet - already reset.
+    });
+  } catch (err) {
+    console.error("resetMilestoneLog failed:", err);
+  }
+  event.completed();
+}
+
+Office.actions.associate("resetMilestoneLog", resetMilestoneLog);
+
+/**
  * Ribbon button handler. Opens the floating logger dialog. If it's already
  * open, does nothing - there's only ever one at a time.
  */
