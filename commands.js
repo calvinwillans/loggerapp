@@ -11,6 +11,16 @@ const ACTIONS_SHEET = "Actions";
 const DEPARTMENT_COLUMN = "C";
 const ACTION_COLUMN = "F";
 
+const MILESTONE_SHEET = "Event Checks";
+const STATE_SHEET = "_LoggerState";
+
+// Cell on "Event Checks" -> the row to append to Log once that cell is
+// populated. Add more entries here in the same shape as they come up -
+// leave any column "" to leave it blank on the logged row.
+const MILESTONE_MAP = {
+  F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
+};
+
 let dialog = null;
 
 // Runs once, as soon as this page loads. With the shared runtime + a "long"
@@ -24,6 +34,7 @@ Office.onReady(async (info) => {
       console.error("setStartupBehavior failed:", err);
     }
     await registerDepartmentWatcher();
+    await registerMilestoneWatcher();
   }
 });
 
@@ -142,6 +153,143 @@ function columnIndexToLetter(index) {
     n = Math.floor((n - 1) / 26);
   }
   return letters;
+}
+
+/**
+ * Registers a listener on "Event Checks": when a mapped cell gets a value,
+ * appends the corresponding row to Log. Each cell only fires once - once
+ * logged, it's recorded on the hidden "_LoggerState" sheet so re-editing
+ * that cell later (fixing a typo, say) doesn't create a duplicate row.
+ * Delete the matching row on _LoggerState to let a cell fire again, or
+ * clear the whole sheet to reset between events.
+ */
+async function registerMilestoneWatcher() {
+  await Excel.run(async (context) => {
+    const checksSheet = context.workbook.worksheets.getItemOrNullObject(MILESTONE_SHEET);
+    checksSheet.load("isNullObject");
+    await context.sync();
+
+    if (checksSheet.isNullObject) {
+      console.error(`"${MILESTONE_SHEET}" sheet not found - milestone watcher not registered.`);
+      return;
+    }
+
+    checksSheet.onChanged.add(onMilestoneSheetChanged);
+    await context.sync();
+    console.log("Milestone watcher registered.");
+  });
+}
+
+async function onMilestoneSheetChanged(eventArgs) {
+  await Excel.run(async (context) => {
+    const checksSheet = context.workbook.worksheets.getItem(MILESTONE_SHEET);
+
+    const changedRange = checksSheet.getRange(eventArgs.address.split("!").pop());
+    changedRange.load(["rowIndex", "rowCount", "columnIndex", "columnCount"]);
+    await context.sync();
+
+    // Which mapped cells does this edit touch?
+    const touched = Object.keys(MILESTONE_MAP).filter((cellAddress) => {
+      const { row, col } = a1ToRowCol(cellAddress);
+      const withinRows = row >= changedRange.rowIndex && row < changedRange.rowIndex + changedRange.rowCount;
+      const withinCols = col >= changedRange.columnIndex && col < changedRange.columnIndex + changedRange.columnCount;
+      return withinRows && withinCols;
+    });
+    if (touched.length === 0) return;
+
+    const alreadyLogged = await getLoggedMilestones(context);
+
+    for (const cellAddress of touched) {
+      if (alreadyLogged.has(cellAddress.toUpperCase())) continue;
+
+      const cell = checksSheet.getRange(cellAddress);
+      cell.load("text");
+      await context.sync();
+      if ((cell.text[0][0] || "").toString().trim() === "") continue; // cleared, not populated
+
+      await appendMilestoneRow(context, MILESTONE_MAP[cellAddress]);
+      await markMilestoneLogged(context, cellAddress);
+    }
+  });
+}
+
+async function appendMilestoneRow(context, mapping) {
+  const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+  logSheet.load("isNullObject");
+  await context.sync();
+  if (logSheet.isNullObject) {
+    console.error(`"${LOG_SHEET}" sheet not found - milestone not logged.`);
+    return;
+  }
+
+  const nextRow = await findNextLogRow(context, logSheet);
+  const timeString = new Date().toLocaleTimeString("en-AU", { hour12: false, timeZone: "Australia/Perth" });
+
+  logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [
+    [timeString, mapping.b || "", mapping.c || "", mapping.d || "", mapping.e || ""],
+  ];
+  await context.sync();
+}
+
+/** Same "next empty row" scan handleLogEntry uses, kept separate so this path can never affect the dialog's own logging. */
+async function findNextLogRow(context, logSheet) {
+  const scanRange = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
+  scanRange.load("text");
+  await context.sync();
+
+  const colText = scanRange.text;
+  for (let i = 0; i < colText.length; i++) {
+    if ((colText[i][0] || "").toString().trim() === "") return LOG_FIRST_DATA_ROW + i;
+  }
+  return LOG_MAX_ROW + 1;
+}
+
+async function getLoggedMilestones(context) {
+  const stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
+  stateSheet.load("isNullObject");
+  await context.sync();
+  if (stateSheet.isNullObject) return new Set();
+
+  const used = stateSheet.getUsedRangeOrNullObject();
+  used.load(["isNullObject", "values"]);
+  await context.sync();
+  if (used.isNullObject) return new Set();
+
+  const logged = new Set();
+  for (const row of used.values) {
+    const key = (row[0] || "").toString().trim().toUpperCase();
+    if (key && key !== "LOGGEDMILESTONES") logged.add(key);
+  }
+  return logged;
+}
+
+async function markMilestoneLogged(context, cellAddress) {
+  let stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
+  stateSheet.load("isNullObject");
+  await context.sync();
+
+  if (stateSheet.isNullObject) {
+    stateSheet = context.workbook.worksheets.add(STATE_SHEET);
+    stateSheet.getRange("A1").values = [["LoggedMilestones"]];
+    stateSheet.visibility = Excel.SheetVisibility.hidden;
+    await context.sync();
+  }
+
+  const used = stateSheet.getUsedRangeOrNullObject();
+  used.load(["isNullObject", "rowIndex", "rowCount"]);
+  await context.sync();
+
+  const nextIndex = used.isNullObject ? 1 : used.rowIndex + used.rowCount; // 0-based
+  stateSheet.getRangeByIndexes(nextIndex, 0, 1, 1).values = [[cellAddress.toUpperCase()]];
+  await context.sync();
+}
+
+function a1ToRowCol(address) {
+  const match = address.toUpperCase().match(/^([A-Z]+)(\d+)$/);
+  const row = parseInt(match[2], 10) - 1;
+  let col = 0;
+  for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { row, col: col - 1 };
 }
 
 /**
