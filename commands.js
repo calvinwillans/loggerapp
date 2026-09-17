@@ -20,12 +20,12 @@ const STATE_SHEET = "_LoggerState";
 const MILESTONE_MAP = {
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
   F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
-  E50: { b; "Base", c: "", d: "", e: "WAPOL arrived onsite" },
+  E50: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
   E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
   E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
   C73: { b: "Base", c: "All Call", d: "", e: "Start of support act" },
-  D73: { b: "Base", c: "All Call", d: "", e: "End of support act" }
+  D73: { b: "Base", c: "All Call", d: "", e: "End of support act" },
   C74: { b: "Base", c: "All Call", d: "", e: "Start of main act/game" },
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
@@ -217,7 +217,8 @@ async function onMilestoneSheetChanged(eventArgs) {
       const cell = checksSheet.getRange(cellAddress);
       cell.load("text");
       await context.sync();
-      if ((cell.text[0][0] || "").toString().trim() === "") continue; // cleared, not populated
+      const displayValue = (cell.text[0][0] || "").toString().trim();
+      if (displayValue === "" || isNotApplicable(displayValue)) continue; // cleared or marked N/A - not populated
 
       await appendMilestoneRow(context, MILESTONE_MAP[cellAddress]);
       await markMilestoneLogged(context, cellAddress);
@@ -302,6 +303,10 @@ function a1ToRowCol(address) {
   let col = 0;
   for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
   return { row, col: col - 1 };
+}
+
+function isNotApplicable(text) {
+  return /^n\/?a$/i.test(text.trim());
 }
 
 /**
