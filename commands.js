@@ -19,6 +19,18 @@ const STATE_SHEET = "_LoggerState";
 // leave any column "" to leave it blank on the logged row.
 const MILESTONE_MAP = {
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
+  F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
+  E50: { b; "Base", c: "", d: "", e: "WAPOL arrived onsite" },
+  E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
+  E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
+  E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
+  C73: { b: "Base", c: "All Call", d: "", e: "Start of support act" },
+  D73: { b: "Base", c: "All Call", d: "", e: "End of support act" }
+  C74: { b: "Base", c: "All Call", d: "", e: "Start of main act/game" },
+  C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
+  D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
+  F87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
+  F109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
 };
 
 let dialog = null;
