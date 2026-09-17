@@ -184,6 +184,11 @@ function openLogger(event) {
   );
 }
 
+// Required for ExecuteFunction ribbon commands (enforced since Oct 2022,
+// strictly so under the shared runtime) - without this, Office can't find
+// openLogger by name alone and the button click does nothing.
+Office.actions.associate("openLogger", openLogger);
+
 /**
  * Parses a space-delimited shorthand line ("l1s ps ed14 ws"), resolves each
  * token against the Inputs sheet, and appends one row to Log.
