@@ -1,0 +1,265 @@
+// Set this to match where you host these files, e.g. "https://yourname.github.io/venue-logger-dialog"
+const BASE_URL = "https://calvinwillans.github.io/loggerapp";
+const DIALOG_URL = BASE_URL + "/dialog.html";
+
+const INPUTS_SHEET = "Inputs";
+const LOG_SHEET = "Log";
+const LOG_FIRST_DATA_ROW = 8; // first entry always lands here, matching the template
+const LOG_MAX_ROW = 5000; // generous ceiling when scanning for the next empty row
+
+const ACTIONS_SHEET = "Actions";
+const DEPARTMENT_COLUMN = "C";
+const ACTION_COLUMN = "F";
+
+let dialog = null;
+
+// Runs once, as soon as this page loads. With the shared runtime + a "long"
+// lifetime in the manifest, that's now on workbook open rather than only
+// when the ribbon button is clicked or a dialog message arrives.
+Office.onReady(async (info) => {
+  if (info.host === Office.HostType.Excel) {
+    try {
+      await Office.addin.setStartupBehavior(Office.StartupBehavior.load);
+    } catch (err) {
+      console.error("setStartupBehavior failed:", err);
+    }
+    await registerDepartmentWatcher();
+  }
+});
+
+/**
+ * Registers a listener on the Log sheet: any edit to column C (Department)
+ * refreshes that row's Action Taken (F) dropdown to match the corresponding
+ * column on the Actions sheet. Fully open-ended - add a new column to
+ * Actions with any header text and it's usable immediately, no other
+ * changes needed.
+ */
+async function registerDepartmentWatcher() {
+  await Excel.run(async (context) => {
+    const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+    logSheet.load("isNullObject");
+    await context.sync();
+
+    if (logSheet.isNullObject) {
+      console.error(`"${LOG_SHEET}" sheet not found - department watcher not registered.`);
+      return;
+    }
+
+    logSheet.onChanged.add(onLogSheetChanged);
+    await context.sync();
+    console.log("Department watcher registered.");
+  });
+}
+
+async function onLogSheetChanged(eventArgs) {
+  await Excel.run(async (context) => {
+    const logSheet = context.workbook.worksheets.getItem(LOG_SHEET);
+
+    const changedRange = logSheet.getRange(eventArgs.address.split("!").pop());
+    changedRange.load(["rowIndex", "rowCount", "columnIndex", "columnCount"]);
+    await context.sync();
+
+    const deptColIndex = columnLetterToIndex(DEPARTMENT_COLUMN);
+    const touchesDept =
+      changedRange.columnIndex <= deptColIndex &&
+      deptColIndex < changedRange.columnIndex + changedRange.columnCount;
+    if (!touchesDept) return;
+
+    const firstDataRowIndex = LOG_FIRST_DATA_ROW - 1;
+    const startRow = Math.max(changedRange.rowIndex, firstDataRowIndex);
+    const endRow = changedRange.rowIndex + changedRange.rowCount - 1;
+    if (endRow < firstDataRowIndex) return;
+
+    const sources = await buildActionSources(context);
+
+    for (let r = startRow; r <= endRow; r++) {
+      const rowNum = r + 1; // 1-based
+      const deptCell = logSheet.getRange(`${DEPARTMENT_COLUMN}${rowNum}`);
+      deptCell.load("values");
+      await context.sync();
+
+      const department = (deptCell.values[0][0] || "").toString().trim().toLowerCase();
+      const actionCell = logSheet.getRange(`${ACTION_COLUMN}${rowNum}`);
+      actionCell.dataValidation.clear();
+
+      const source = sources[department];
+      if (source) {
+        actionCell.dataValidation.rule = { list: { inCellDropDown: true, source: source } };
+      }
+      await context.sync();
+    }
+  });
+}
+
+/** Reads Actions!row1 headers and returns { lowercased-header -> "=Actions!$X$2:$X$N" }. */
+async function buildActionSources(context) {
+  const actionsSheet = context.workbook.worksheets.getItemOrNullObject(ACTIONS_SHEET);
+  actionsSheet.load("isNullObject");
+  await context.sync();
+  if (actionsSheet.isNullObject) return {};
+
+  const used = actionsSheet.getUsedRange();
+  used.load("values, rowIndex, columnIndex");
+  await context.sync();
+
+  const sources = {};
+  const values = used.values;
+  const headerRow = values[0];
+  const originRow = used.rowIndex;
+  const originCol = used.columnIndex;
+
+  for (let c = 0; c < headerRow.length; c++) {
+    const header = (headerRow[c] || "").toString().trim();
+    if (!header) continue;
+
+    let lastDataIndex = 0;
+    for (let r = 1; r < values.length; r++) {
+      if ((values[r][c] || "").toString().trim() !== "") lastDataIndex = r;
+    }
+    if (lastDataIndex === 0) continue; // header with nothing under it yet
+
+    const colLetter = columnIndexToLetter(originCol + c);
+    const firstDataRow = originRow + 2;               // 1-based, just below header
+    const lastDataRow = originRow + lastDataIndex + 1; // 1-based, last item
+
+    sources[header.toLowerCase()] = `=${ACTIONS_SHEET}!$${colLetter}$${firstDataRow}:$${colLetter}$${lastDataRow}`;
+  }
+  return sources;
+}
+
+function columnLetterToIndex(letters) {
+  let index = 0;
+  for (const ch of letters.toUpperCase()) index = index * 26 + (ch.charCodeAt(0) - 64);
+  return index - 1;
+}
+
+function columnIndexToLetter(index) {
+  let letters = "";
+  let n = index + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+/**
+ * Ribbon button handler. Opens the floating logger dialog. If it's already
+ * open, does nothing - there's only ever one at a time.
+ */
+function openLogger(event) {
+  if (dialog) {
+    event.completed();
+    return;
+  }
+
+  Office.context.ui.displayDialogAsync(
+    DIALOG_URL,
+    { height: 20, width: 28, promptBeforeOpen: false },
+    (asyncResult) => {
+      if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+        console.error(`Dialog failed to open: ${asyncResult.error.message}`);
+        event.completed();
+        return;
+      }
+
+      dialog = asyncResult.value;
+
+      // The dialog sends the raw shorthand line here every time the user
+      // presses Enter. This page (not the dialog) does the Excel.run work.
+      dialog.addEventHandler(Office.EventType.DialogMessageReceived, async (arg) => {
+        const status = await handleLogEntry(arg.message);
+        dialog.messageChild(status);
+      });
+
+      // If the user closes the floating box, forget the reference so the
+      // ribbon button can open a fresh one next time.
+      dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
+        dialog = null;
+      });
+
+      event.completed();
+    }
+  );
+}
+
+/**
+ * Parses a space-delimited shorthand line ("l1s ps ed14 ws"), resolves each
+ * token against the Inputs sheet, and appends one row to Log.
+ */
+async function handleLogEntry(rawText) {
+  try {
+    return await Excel.run(async (context) => {
+      const inputsSheet = context.workbook.worksheets.getItemOrNullObject(INPUTS_SHEET);
+      const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+      inputsSheet.load("isNullObject");
+      logSheet.load("isNullObject");
+      await context.sync();
+
+      if (inputsSheet.isNullObject) return `Error: "${INPUTS_SHEET}" sheet not found.`;
+      if (logSheet.isNullObject) return `Error: "${LOG_SHEET}" sheet not found.`;
+
+      // --- Build the shorthand dictionary ---
+      const inputsRange = inputsSheet.getUsedRange();
+      inputsRange.load("values");
+      await context.sync();
+
+      const dictionary = {};
+      for (const row of inputsRange.values || []) {
+        const shorthand = (row[0] || "").toString().trim().toUpperCase();
+        const expansion = (row[1] || "").toString().trim();
+        if (shorthand !== "") dictionary[shorthand] = expansion;
+      }
+
+      // --- Split the single line on whitespace into up to 4 fields ---
+      const tokens = rawText.trim().split(/\s+/).filter((t) => t !== "");
+      if (tokens.length === 0) return "Nothing to log.";
+
+      const resolved = [0, 1, 2, 3].map((i) => {
+        const token = tokens[i];
+        if (!token || token === "-") return "";
+        const key = token.toUpperCase();
+        return dictionary[key] !== undefined ? dictionary[key] : token;
+      });
+
+      // --- Find the next empty row on Log ---
+      // Scans the DISPLAYED text in column A starting at LOG_FIRST_DATA_ROW,
+      // rather than raw values or the sheet's used range. A cell can look
+      // blank on screen while its underlying value isn't a true empty string
+      // (a stray space, or a template formula/format that hides a result) -
+      // .text reflects what's actually visible, matching what the row looks
+      // like to a person reading the sheet.
+      const scanRange = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
+      scanRange.load("text");
+      await context.sync();
+
+      let nextRow = LOG_MAX_ROW + 1; // fallback if every scanned row is already filled
+      const colText = scanRange.text;
+      for (let i = 0; i < colText.length; i++) {
+        const cellText = (colText[i][0] || "").toString().trim();
+        if (cellText === "") {
+          nextRow = LOG_FIRST_DATA_ROW + i;
+          break;
+        }
+      }
+
+      // --- Write timestamp + the 4 resolved values ---
+      const timeString = new Date().toLocaleTimeString("en-AU", {
+        hour12: false,
+        timeZone: "Australia/Perth",
+      });
+
+      logSheet
+        .getRange(`A${nextRow}:E${nextRow}`)
+        .values = [[timeString, resolved[0], resolved[1], resolved[2], resolved[3]]];
+      await context.sync();
+
+      const summary = resolved.filter((v) => v !== "").join(" | ");
+      return `Row ${nextRow}: ${summary}`;
+    });
+  } catch (err) {
+    console.error(err);
+    return "Error: " + (err.message || err);
+  }
+}
