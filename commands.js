@@ -7,6 +7,7 @@ const INPUTS_SHEET = "Inputs";
 const INPUTS_TYPE_COL = 2;   // C - Callsign / Department / Incident / Location
 const INPUTS_GROUP_COL = 3;  // D - group path, e.g. "Blocks/200s" or "Level 2;Toilets"
 const INPUTS_COLOUR_COL = 4; // E - hex colour, e.g. #1D4ED8
+const INPUTS_HOME_COL = 5;   // F - callsigns only: a location label, or a location folder path
 const BUTTON_TYPES = ["callsign", "department", "incident", "location"];
 
 // Dialog size, as a percentage of the screen.
@@ -447,7 +448,7 @@ async function sendMenu() {
   }
 }
 
-/** Returns [code, label, type, group, colour] for every Inputs row with a Button type. */
+/** Returns [code, label, type, group, colour, home] for every Inputs row with a Button type. */
 async function readButtonRows() {
   return await Excel.run(async (context) => {
     const inputsSheet = context.workbook.worksheets.getItemOrNullObject(INPUTS_SHEET);
@@ -469,7 +470,14 @@ async function readButtonRows() {
       const type = cell(row, INPUTS_TYPE_COL);
       const label = cell(row, 1);
       if (!label || BUTTON_TYPES.indexOf(type.toLowerCase()) === -1) continue;
-      rows.push([cell(row, 0), label, type, cell(row, INPUTS_GROUP_COL), cell(row, INPUTS_COLOUR_COL)]);
+      rows.push([
+        cell(row, 0),
+        label,
+        type,
+        cell(row, INPUTS_GROUP_COL),
+        cell(row, INPUTS_COLOUR_COL),
+        cell(row, INPUTS_HOME_COL),
+      ]);
     }
     return rows;
   });

@@ -27,9 +27,9 @@ const SEND_TIMEOUT_MS = 12000;
 // Top-level location groups shown first, in this order. Any other groups
 // follow in the order they first appear on the Inputs sheet.
 const LOCATION_GROUP_ORDER = [
-  "External", "Internal", "Blocks",
-  "Basement", "Ground Floor", "Level 1", "Level 2", "Level 3", "Level 4",
-  "Catwalk", "Block", "Toilets", "Bars", "Outlets",
+  "Internal", "External", "Function Areas",
+  "Level 1", "Level 2", "Level 3", "Level 4", "Level 5",
+  "Catwalk", "Block", "Toilets",
 ];
 
 let menu = { callsign: [], department: [], incident: [], location: [] };
@@ -40,6 +40,7 @@ let sel = emptySelection();
 let skipped = {};
 let stage = "callsign";
 let locPath = [];      // names of the location groups drilled into
+let autoLocation = false; // true when Location was filled in from the callsign
 let busy = false;
 let busyTimer = null;
 let pendingRecent = null;
@@ -131,13 +132,13 @@ function onParentMessage(raw) {
  * Button data
  * ========================================================================*/
 
-/** rows: [code, label, type, group, colour][] */
+/** rows: [code, label, type, group, colour, home][] */
 function ingestMenu(rows) {
   menu = { callsign: [], department: [], incident: [], location: [] };
   for (const r of rows) {
     const type = (r[2] || "").toLowerCase();
     if (!menu[type]) continue;
-    menu[type].push({ code: r[0] || "", label: r[1] || "", group: r[3] || "", colour: r[4] || "", type });
+    menu[type].push({ code: r[0] || "", label: r[1] || "", group: r[3] || "", colour: r[4] || "", home: r[5] || "", type });
   }
 
   deptColour = {};
@@ -210,6 +211,37 @@ function currentLocNode() {
   return node;
 }
 
+/**
+ * A callsign's home (Inputs column F) is either a folder path, which the
+ * location screen opens inside, or a location label, which fills in
+ * Location automatically. If a name is both (e.g. "Level 4"), the folder
+ * wins, since the matching location button is inside it anyway.
+ * Returns { path } or { item }, or null.
+ */
+function homeFor(callsign) {
+  if (!callsign || !callsign.home || !locTree) return null;
+  const home = callsign.home.trim().toLowerCase();
+
+  const path = [];
+  let node = locTree;
+  for (const part of home.split("/").map((x) => x.trim()).filter(Boolean)) {
+    const name = Object.keys(node.childMap).find((n) => n.toLowerCase() === part);
+    if (!name) { path.length = 0; break; }
+    path.push(name);
+    node = node.childMap[name];
+  }
+  if (path.length) return { path };
+
+  const item = menu.location.find((l) => l.label.toLowerCase() === home);
+  return item ? { item } : null;
+}
+
+/** Folder the location screen should open in for the current callsign. */
+function startPath() {
+  const home = homeFor(sel.callsign);
+  return home && home.path ? home.path.slice() : [];
+}
+
 function incidentsFor(dept) {
   if (!dept) return [];
   const d = dept.label.toLowerCase();
@@ -235,15 +267,35 @@ function pick(key, item) {
   if (key === "department" && sel.incident && incidentsFor(item).indexOf(sel.incident) === -1) {
     sel.incident = null;
   }
-  if (key === "location") locPath = [];
+  if (key === "location") {
+    locPath = [];
+    autoLocation = false;
+  }
+  if (key === "callsign") applyHome(item);
   advanceFrom(key);
+}
+
+/** Fill Location from the callsign's home, replacing only an earlier auto-fill. */
+function applyHome(callsign) {
+  if (autoLocation) {
+    sel.location = null;
+    autoLocation = false;
+  }
+  const home = homeFor(callsign);
+  if (home && home.item && !sel.location && !skipped.location) {
+    sel.location = home.item;
+    autoLocation = true;
+  }
 }
 
 function skipStage() {
   if (stage === "done") return;
   sel[stage] = null;
   skipped[stage] = true;
-  if (stage === "location") locPath = [];
+  if (stage === "location") {
+    locPath = [];
+    autoLocation = false;
+  }
   advanceFrom(stage);
 }
 
@@ -254,6 +306,7 @@ function advanceFrom(key) {
     const s = STAGES[(start + step) % STAGES.length].key;
     if (!sel[s] && !skipped[s] && applicable(s)) {
       stage = s;
+      if (s === "location") locPath = startPath();
       render();
       $("logInput").focus();
       return;
@@ -266,7 +319,7 @@ function advanceFrom(key) {
 
 function goToStage(key) {
   stage = key;
-  if (key === "location") locPath = [];
+  if (key === "location") locPath = startPath();
   render();
 }
 
@@ -274,6 +327,7 @@ function resetEntry() {
   sel = emptySelection();
   skipped = {};
   locPath = [];
+  autoLocation = false;
   stage = "callsign";
   $("logInput").value = "";
   render();
@@ -355,6 +409,7 @@ function useRecent(r) {
   if (busy) return;
   sel = emptySelection();
   skipped = {};
+  autoLocation = false;
   for (const s of STAGES) {
     const saved = r[s.key];
     sel[s.key] = saved ? (menu[s.key].find((i) => i.label === saved.label) || saved) : null;
@@ -417,7 +472,8 @@ function renderDocket() {
     else { text = "—"; empty = true; }
 
     b.innerHTML = '<span class="slot-name"></span><span class="slot-value"></span>';
-    b.querySelector(".slot-name").textContent = s.name;
+    b.querySelector(".slot-name").textContent =
+      s.key === "location" && autoLocation ? s.name + " (from callsign)" : s.name;
     const v = b.querySelector(".slot-value");
     v.textContent = text;
     v.title = text;
