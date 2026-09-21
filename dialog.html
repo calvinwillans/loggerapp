@@ -1,45 +1,246 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Venue Logger</title>
   <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0;
-      padding: 14px;
-      background: #f8fafc;
-      color: #0f172a;
+    :root {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #d5dde8;
+      --navy: #1e3a8a;
+      --focus: #2563eb;
+      --ok: #15803d;
+      --err: #b91c1c;
+      --busy: #b45309;
     }
-    h1 { font-size: 14px; color: #1e3a8a; margin: 0 0 8px; }
-    input[type="text"] {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 12px;
-      font-size: 17px;
-      border: 2px solid #cbd5e1;
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0f172a; --panel: #1e293b; --ink: #e2e8f0; --muted: #94a3b8;
+        --line: #334155; --navy: #93c5fd; --focus: #60a5fa;
+        --ok: #4ade80; --err: #f87171; --busy: #fbbf24;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0f172a; --panel: #1e293b; --ink: #e2e8f0; --muted: #94a3b8;
+      --line: #334155; --navy: #93c5fd; --focus: #60a5fa;
+      --ok: #4ade80; --err: #f87171; --busy: #fbbf24;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
+      font-size: 14px;
+    }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+    /* ---- The docket: the entry being built, one slot per Log column ---- */
+    .docket {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .slot {
+      text-align: left;
+      background: none;
+      border: 0;
+      border-right: 1px solid var(--line);
+      padding: 8px 12px 10px;
+      position: relative;
+      min-width: 0;
+    }
+    .slot:last-child { border-right: 0; }
+    .slot-name { display: block; font-size: 11px; color: var(--muted); }
+    .slot-value {
+      display: block;
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .slot-value.empty { color: var(--muted); font-weight: 400; }
+    .slot::after {
+      content: "";
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 4px;
+      background: var(--slot-colour, transparent);
+    }
+    .slot.active { background: var(--bg); }
+    .slot.active .slot-name { color: var(--navy); font-weight: 700; }
+    .slot.active::after { background: var(--navy); }
+
+    /* ---- Stage header ---- */
+    .stagebar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px 6px;
+    }
+    .stage-title { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; }
+    .stage-title .path { color: var(--muted); font-weight: 400; }
+    .ghost {
+      background: var(--panel);
+      border: 1px solid var(--line);
       border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 13px;
+    }
+    .ghost:hover { border-color: var(--muted); }
+
+    /* ---- Tile grid ---- */
+    .grid {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 14px 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      grid-auto-rows: minmax(60px, auto);
+      gap: 8px;
+      align-content: start;
+    }
+    .grid.compact {
+      grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+      grid-auto-rows: 46px;
+      gap: 6px;
+    }
+    .tile {
+      position: relative;
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 1.2;
+      background: var(--tile, #475569);
+      color: var(--tile-ink, #fff);
+      display: flex;
+      align-items: flex-end;
+      transition: transform 60ms ease;
+    }
+    .tile:active { transform: scale(0.97); }
+    .grid.compact .tile { justify-content: center; align-items: center; text-align: center; font-size: 15px; padding: 4px; }
+    .tile .code {
+      position: absolute;
+      top: 5px; right: 7px;
+      font-size: 10px;
+      font-weight: 500;
+      opacity: 0.75;
+    }
+    .tile.chosen { box-shadow: 0 0 0 3px var(--panel), 0 0 0 6px var(--tile, #475569); }
+    .tile.folder { align-items: stretch; flex-direction: column; justify-content: space-between; font-size: 15px; }
+    .tile.folder .count { font-size: 12px; font-weight: 500; opacity: 0.8; align-self: flex-end; }
+    .grid .notice { grid-column: 1 / -1; color: var(--muted); padding: 18px 2px; line-height: 1.5; }
+
+    /* ---- Recent entries ---- */
+    .recents {
+      display: flex;
+      gap: 6px;
+      padding: 8px 14px;
+      overflow-x: auto;
+      border-top: 1px solid var(--line);
+      align-items: center;
+    }
+    .recents:empty { display: none; }
+    .recents .label { font-size: 12px; color: var(--muted); flex: none; }
+    .chip {
+      flex: none;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-left: 4px solid var(--chip, var(--navy));
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      max-width: 260px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ---- Entry bar ---- */
+    .entry {
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      padding: 10px 14px 12px;
+    }
+    .entry-row { display: flex; gap: 8px; }
+    #logInput {
+      flex: 1;
+      min-width: 0;
+      padding: 11px 12px;
+      font-size: 16px;
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
       outline: none;
     }
-    input[type="text"]:focus { border-color: #3b82f6; }
-    input[type="text"]:disabled { background: #f1f5f9; }
-    #status { margin-top: 8px; font-size: 12px; font-weight: 600; min-height: 16px; }
-    .status-ok { color: #16a34a; }
-    .status-err { color: #dc2626; }
-    .status-busy { color: #d97706; }
-    .hint { margin-top: 10px; font-size: 11px; color: #64748b; line-height: 1.4; }
-    code { background: #e2e8f0; padding: 1px 4px; border-radius: 4px; }
+    #logInput:focus { border-color: var(--focus); }
+    #logInput:disabled { opacity: 0.6; }
+    .primary {
+      background: var(--navy);
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 18px;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    :root[data-theme="dark"] .primary { color: #0f172a; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .primary { color: #0f172a; } }
+    .primary:disabled { opacity: 0.5; cursor: default; }
+    .entry-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 10px; }
+    #status { font-size: 12px; font-weight: 600; min-height: 16px; }
+    .status-ok { color: var(--ok); }
+    .status-err { color: var(--err); }
+    .status-busy { color: var(--busy); }
+    .linkish { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 4px; text-decoration: underline; }
+
+    @media (prefers-reduced-motion: reduce) { .tile { transition: none; } }
   </style>
 </head>
 <body>
-  <h1>Venue Logger</h1>
-  <input type="text" id="logInput" autocomplete="off" placeholder="l1s ps ed14 ws" autofocus />
-  <div id="status">Ready.</div>
-  <div class="hint">
-    Type up to 4 codes separated by spaces, then press <b>Enter</b>. Use <code>-</code> to skip a field.
-    Drag this box anywhere - it stays open, so you can log as many entries as you need.
+  <nav class="docket" id="docket" aria-label="Entry being built"></nav>
+
+  <div class="stagebar">
+    <div class="stage-title" id="stageTitle"></div>
+    <button class="ghost" id="backBtn" type="button" hidden>Back</button>
+    <button class="ghost" id="skipBtn" type="button">Skip</button>
   </div>
+
+  <main class="grid" id="grid" aria-live="polite"></main>
+
+  <div class="recents" id="recents"></div>
+
+  <footer class="entry">
+    <div class="entry-row">
+      <input type="text" id="logInput" autocomplete="off" spellcheck="false" />
+      <button class="primary" id="logBtn" type="button">Log entry</button>
+    </div>
+    <div class="entry-meta">
+      <div id="status">Loading buttons…</div>
+      <div>
+        <button class="linkish" id="clearBtn" type="button">Clear</button>
+        <button class="linkish" id="refreshBtn" type="button">Reload buttons</button>
+      </div>
+    </div>
+  </footer>
+
   <script type="text/javascript" src="dialog.js"></script>
 </body>
 </html>

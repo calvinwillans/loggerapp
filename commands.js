@@ -3,6 +3,17 @@ const BASE_URL = "https://calvinwillans.github.io/loggerapp";
 const DIALOG_URL = BASE_URL + "/dialog.html";
 
 const INPUTS_SHEET = "Inputs";
+// Inputs columns used to build the dialog's buttons (A = code, B = label).
+const INPUTS_TYPE_COL = 2;   // C - Callsign / Department / Incident / Location
+const INPUTS_GROUP_COL = 3;  // D - group path, e.g. "Blocks/200s" or "Level 2;Toilets"
+const INPUTS_COLOUR_COL = 4; // E - hex colour, e.g. #1D4ED8
+const BUTTON_TYPES = ["callsign", "department", "incident", "location"];
+
+// Dialog size, as a percentage of the screen.
+const DIALOG_WIDTH = 50;
+const DIALOG_HEIGHT = 75;
+// Office caps each message to the dialog, so the button data goes in pieces.
+const MESSAGE_CHUNK_CHARS = 15000;
 const LOG_SHEET = "Log";
 const LOG_FIRST_DATA_ROW = 8; // first entry always lands here, matching the template
 const LOG_MAX_ROW = 5000; // generous ceiling when scanning for the next empty row
@@ -349,7 +360,7 @@ function openLogger(event) {
 
   Office.context.ui.displayDialogAsync(
     DIALOG_URL,
-    { height: 20, width: 28, promptBeforeOpen: false },
+    { height: DIALOG_HEIGHT, width: DIALOG_WIDTH, promptBeforeOpen: false },
     (asyncResult) => {
       if (asyncResult.status === Office.AsyncResultStatus.Failed) {
         console.error(`Dialog failed to open: ${asyncResult.error.message}`);
@@ -359,11 +370,10 @@ function openLogger(event) {
 
       dialog = asyncResult.value;
 
-      // The dialog sends the raw shorthand line here every time the user
-      // presses Enter. This page (not the dialog) does the Excel.run work.
+      // Everything the dialog asks for arrives here. This page (not the
+      // dialog) does all the Excel.run work.
       dialog.addEventHandler(Office.EventType.DialogMessageReceived, async (arg) => {
-        const status = await handleLogEntry(arg.message);
-        dialog.messageChild(status);
+        await routeDialogMessage(arg.message);
       });
 
       // If the user closes the floating box, forget the reference so the
@@ -375,6 +385,126 @@ function openLogger(event) {
       event.completed();
     }
   );
+}
+
+/**
+ * Dialog messages are JSON: { kind: "ready" | "text" | "entry", ... }.
+ * A plain string (from an older cached dialog) is treated as shorthand.
+ */
+async function routeDialogMessage(raw) {
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch (e) {
+    msg = { kind: "text", text: raw };
+  }
+
+  if (msg.kind === "ready") {
+    await sendMenu();
+    return;
+  }
+
+  let status;
+  if (msg.kind === "entry") {
+    status = await handleButtonEntry(msg.fields || []);
+  } else {
+    status = await handleLogEntry(msg.text || "");
+  }
+  sendToDialog({ kind: "status", ok: !/^error/i.test(status), text: status });
+}
+
+function sendToDialog(obj) {
+  if (!dialog) return;
+  try {
+    dialog.messageChild(JSON.stringify(obj));
+  } catch (err) {
+    console.error("messageChild failed:", err);
+  }
+}
+
+/** Reads the button rows off Inputs and sends them to the dialog in chunks. */
+async function sendMenu() {
+  let rows = [];
+  try {
+    rows = await readButtonRows();
+  } catch (err) {
+    console.error(err);
+    sendToDialog({ kind: "status", ok: false, text: "Error reading Inputs: " + (err.message || err) });
+    return;
+  }
+
+  const json = JSON.stringify(rows);
+  const id = Date.now().toString(36);
+  const n = Math.max(1, Math.ceil(json.length / MESSAGE_CHUNK_CHARS));
+  for (let i = 0; i < n; i++) {
+    sendToDialog({
+      kind: "menuChunk",
+      id: id,
+      i: i,
+      n: n,
+      data: json.slice(i * MESSAGE_CHUNK_CHARS, (i + 1) * MESSAGE_CHUNK_CHARS),
+    });
+  }
+}
+
+/** Returns [code, label, type, group, colour] for every Inputs row with a Button type. */
+async function readButtonRows() {
+  return await Excel.run(async (context) => {
+    const inputsSheet = context.workbook.worksheets.getItemOrNullObject(INPUTS_SHEET);
+    inputsSheet.load("isNullObject");
+    await context.sync();
+    if (inputsSheet.isNullObject) throw new Error(`"${INPUTS_SHEET}" sheet not found.`);
+
+    const used = inputsSheet.getUsedRangeOrNullObject();
+    used.load(["isNullObject", "values", "columnIndex"]);
+    await context.sync();
+    if (used.isNullObject) return [];
+
+    // Offset in case the used range doesn't start in column A.
+    const off = used.columnIndex;
+    const cell = (row, col) => ((row[col - off] === undefined ? "" : row[col - off]) || "").toString().trim();
+
+    const rows = [];
+    for (const row of used.values) {
+      const type = cell(row, INPUTS_TYPE_COL);
+      const label = cell(row, 1);
+      if (!label || BUTTON_TYPES.indexOf(type.toLowerCase()) === -1) continue;
+      rows.push([cell(row, 0), label, type, cell(row, INPUTS_GROUP_COL), cell(row, INPUTS_COLOUR_COL)]);
+    }
+    return rows;
+  });
+}
+
+/**
+ * Writes a row built from dialog buttons. The fields are already full labels
+ * (callsign, department, location, details), so no dictionary lookup.
+ */
+async function handleButtonEntry(fields) {
+  try {
+    return await Excel.run(async (context) => {
+      const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+      logSheet.load("isNullObject");
+      await context.sync();
+      if (logSheet.isNullObject) return `Error: "${LOG_SHEET}" sheet not found.`;
+
+      const values = [0, 1, 2, 3].map((i) => (fields[i] || "").toString().trim());
+      if (values.every((v) => v === "")) return "Nothing to log.";
+
+      const nextRow = await findNextLogRow(context, logSheet);
+      const timeString = new Date().toLocaleTimeString("en-AU", {
+        hour12: false,
+        timeZone: "Australia/Perth",
+      });
+
+      logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [[timeString, values[0], values[1], values[2], values[3]]];
+      await context.sync();
+
+      return `Row ${nextRow}: ${values.filter((v) => v !== "").join(" | ")}`;
+    });
+  } catch (err) {
+    console.error(err);
+    return "Error: " + (err.message || err);
+  }
 }
 
 // Required for ExecuteFunction ribbon commands (enforced since Oct 2022,
@@ -407,6 +537,7 @@ async function handleLogEntry(rawText) {
       for (const row of inputsRange.values || []) {
         const shorthand = (row[0] || "").toString().trim().toUpperCase();
         const expansion = (row[1] || "").toString().trim();
+        if (shorthand === "CODE") continue; // column-header row
         if (shorthand !== "") dictionary[shorthand] = expansion;
       }
 

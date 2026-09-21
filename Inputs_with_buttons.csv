@@ -1,0 +1,269 @@
+Code,Label,Button type,Button group,Colour
+,Doors,,,
+ed1,External Door 1,Location,External,#0369A1
+ed2,External Door 2,Location,External,#0369A1
+ed3,External Door 3,Location,External,#0369A1
+ed4,External Door 4,Location,External,#0369A1
+ed5,External Door 5,Location,External,#0369A1
+ed6,External Door 6,Location,External,#0369A1
+ed7,External Door 7,Location,External,#0369A1
+ed8,External Door 8,Location,External,#0369A1
+ed9,External Door 9,Location,External,#0369A1
+ed10,External Door 10,Location,External,#0369A1
+ed11,External Door 11,Location,External,#0369A1
+ed12,External Door 12,Location,External,#0369A1
+ed13,External Door 13,Location,External,#0369A1
+ed14,External Door 14,Location,External,#0369A1
+ed15,External Door 15,Location,External,#0369A1
+ed16,External Door 16,Location,External,#0369A1
+ed17,External Door 17,Location,External,#0369A1
+ed18,External Door 18,Location,External,#0369A1
+ed19,External Door 19,Location,External,#0369A1
+ed20,External Door 20,Location,External,#0369A1
+ed21,External Door 21,Location,External,#0369A1
+ed22,External Door 22,Location,External,#0369A1
+ed23,External Door 23,Location,External,#0369A1
+ed24,External Door 24,Location,External,#0369A1
+ed25,External Door 25,Location,External,#0369A1
+ed26,External Door 26,Location,External,#0369A1
+ed27,External Door 27,Location,External,#0369A1
+ed28,External Door 28,Location,External,#0369A1
+id1,Internal Door 1,Location,Internal,#0F766E
+id2,Internal Door 2,Location,Internal,#0F766E
+id3,Internal Door 3,Location,Internal,#0F766E
+id4,Internal Door 4,Location,Internal,#0F766E
+id5,Internal Door 5,Location,Internal,#0F766E
+id6,Internal Door 6,Location,Internal,#0F766E
+id7,Internal Door 7,Location,Internal,#0F766E
+id8,Internal Door 8,Location,Internal,#0F766E
+id9,Internal Door 9,Location,Internal,#0F766E
+id10,Internal Door 10,Location,Internal,#0F766E
+id11,Internal Door 11,Location,Internal,#0F766E
+id12,Internal Door 12,Location,Internal,#0F766E
+id13,Internal Door 13,Location,Internal,#0F766E
+id14,Internal Door 14,Location,Internal,#0F766E
+id15,Internal Door 15,Location,Internal,#0F766E
+id16,Internal Door 16,Location,Internal,#0F766E
+id17,Internal Door 17,Location,Internal,#0F766E
+id18,Internal Door 18,Location,Internal,#0F766E
+id19,Internal Door 19,Location,Internal,#0F766E
+id20,Internal Door 20,Location,Internal,#0F766E
+id21,Internal Door 21,Location,Internal,#0F766E
+id22,Internal Door 22,Location,Internal,#0F766E
+id23,Internal Door 23,Location,Internal,#0F766E
+id24,Internal Door 24,Location,Internal,#0F766E
+id25,Internal Door 25,Location,Internal,#0F766E
+id26,Internal Door 26,Location,Internal,#0F766E
+id27,Internal Door 27,Location,Internal,#0F766E
+id28,Internal Door 28,Location,Internal,#0F766E
+,,,,
+,Function Areas,,,
+ei,External Indigo Room,Location,Function Areas,#7E22CE
+ii,Internal Indigo Room,Location,Function Areas,#7E22CE
+eg,External Granite Room,Location,Function Areas,#7E22CE
+ig,Internal Granite Room,Location,Function Areas,#7E22CE
+tb,Terrace Bar,Location,Function Areas,#7E22CE
+rev,Reveley Room,Location,Function Areas,#7E22CE
+,,,,
+,Lifts,,,
+vl1,VIP Lift 1,Location,Lifts & Escalators,#334155
+vl2,VIP Lift 2,Location,Lifts & Escalators,#334155
+vl3,VIP Lift 3,Location,Lifts & Escalators,#334155
+fohl,Front of House Lift,Location,Lifts & Escalators,#334155
+bohl,Back of House Lift,Location,Lifts & Escalators,#334155
+,,,,
+,Departments,,,
+safe,Safety/Channel 1,Department,,#B91C1C
+ps,Presentation Services,Department,,#0E7490
+t,Technical,Department,,#6D28D9
+a,Assets,Department,,#57534E
+m,Merchandising,Department,,#C026D3
+foh,Front of House,Department,,#047857
+sec,Security,Department,,#1D4ED8
+car,Carparks,Department,,#A16207
+c,Catering & Retail,Department,,#C2410C
+s,Suites & BOH Catering,Department,,#9F1239
+k,Kitchens,Department,,#4D7C0F
+all,All Call,Department,,#334155
+,,,,
+,Callsigns,,,
+eas,Entry A Supervisor,Callsign,,#1E3A8A
+eatl,Entry A Team Leader,Callsign,,#1E3A8A
+fs,Floor Supervisor,Callsign,,#1E3A8A
+l1s,Level 1 Supervisor,Callsign,,#1E3A8A
+l1tl,Level 1 Team Leader,Callsign,,#1E3A8A
+l4s,Level 4 Supervisor,Callsign,,#1E3A8A
+gfs,Ground Floor Supervisor,Callsign,,#1E3A8A
+ssup,Senior Supervisor,Callsign,,#1E3A8A
+s1,Security 1,Callsign,,#1E3A8A
+ebs,Entry B Supervisor,Callsign,,#1E3A8A
+ss,Stage Supervisor,Callsign,,#1E3A8A
+bs,BOH Supervisor,Callsign,,#1E3A8A
+cro,Control Room Officer,Callsign,,#1E3A8A
+r,Response,Callsign,,#1E3A8A
+u,Usher,Callsign,,#1E3A8A
+wapol,WA Police,Callsign,,#1E3A8A
+med,Medics,Callsign,,#1E3A8A
+base,Base,Callsign,,#1E3A8A
+it,IT,Callsign,,#1E3A8A
+,,,,
+,Venue Locations,,,
+ll,RAC Local Lounge,Location,Venue Areas,#57534E
+eea,External Entry A,Location,Venue Areas,#57534E
+eeb,External Entry B,Location,Venue Areas,#57534E
+eaf,Entry A Foyer,Location,Venue Areas,#57534E
+ebf,Entry B Foyer,Location,Venue Areas,#57534E
+gr,Granite Room,Location,Venue Areas,#57534E
+ir,Indigo Room,Location,Venue Areas,#57534E
+yc,Yellow Corridor,Location,Venue Areas,#57534E
+admin,Administration,Location,Venue Areas,#57534E
+bfl,Bowl floor,Location,Venue Areas,#57534E
+qr,Quiet Room,Location,Venue Areas,#57534E
+pr,Parents Room,Location,Venue Areas,#57534E
+l1,Level 1,Location,Level 1,#475569
+l2,Level 2 Suites,Location,Level 2,#475569
+l3,Level 3 Suites,Location,Level 3,#475569
+l4,Level 4,Location,Level 4,#475569
+cat,Catwalk,Location,Venue Areas,#57534E
+gfse,Ground Floor Suite Entry,Location,Ground Floor,#475569
+cse,Carpark Suite Entry,Location,Venue Areas,#57534E
+,,,,
+,Venue Toilets,,,
+mt,Male Toilets,Location,Toilets,#155E75
+ft,Female Toilets,Location,Toilets,#155E75
+imt,Indigo Male Toilets,Location,Toilets,#155E75
+ift,Indigo Female Toilets,Location,Toilets,#155E75
+gmt,Granite Male Toilets,Location,Toilets,#155E75
+gft,Granite Female Toilets,Location,Toilets,#155E75
+llmt,Local Lounge Male Toilets,Location,Toilets,#155E75
+llft,Local Lounge Female Toilets,Location,Toilets,#155E75
+mtd23,Male Toilets (Doors 2-3),Location,Toilets,#155E75
+ftd23,Female Toilets (Doors 2-3),Location,Toilets,#155E75
+mte,Male Toilets (Doors 7-11),Location,Toilets,#155E75
+fte,Female Toilets (Doors 7-11),Location,Toilets,#155E75
+mts,Male Toilets (Doors 12-15),Location,Toilets,#155E75
+fts,Female Toilets (Doors 12-15),Location,Toilets,#155E75
+mtw,Male Toilets (Doors 16-20),Location,Toilets,#155E75
+ftw,Female Toilets (Doors 16-20),Location,Toilets,#155E75
+mtn,Male Toilets (Walk of Fame),Location,Toilets,#155E75
+ftn,Female Toilets (Walk of Fame),Location,Toilets,#155E75
+mtl2,Male Toilets Level 2,Location,Level 2;Toilets,#155E75
+ftl2,Female Toilets Level 2,Location,Level 2;Toilets,#155E75
+mtl3,Male Toilets Level 3,Location,Level 3;Toilets,#155E75
+ftl3,Female Toilets Level 3,Location,Level 3;Toilets,#155E75
+mtl4e,Male Toilets Level 4 (Door 23),Location,Level 4;Toilets,#155E75
+ftl4e,Female Toilets Level 4 (Door 23),Location,Level 4;Toilets,#155E75
+mtl4w,Male Toilets Level 4 (Door 28),Location,Level 4;Toilets,#155E75
+ftl4w,Female Toilets Level 4 (Door 28),Location,Level 4;Toilets,#155E75
+,,,,
+,Cleaning Calls,,,
+ws,Wet Spill,Incident,Presentation Services,
+ds,Dry Spill,Incident,Presentation Services,
+pd,Pizza Delivery,Incident,Presentation Services,
+bg,Broken Glass,Incident,Presentation Services,
+br,Bins Refreshed,Incident,Presentation Services,
+tr,Toilets Refreshed,Incident,Presentation Services,
+,,,,
+,Bars/Concessions,,,
+llb,Local Lounge Bar,Location,Bars & Food,#C2410C
+llf,Local Lounge Food,Location,Bars & Food,#C2410C
+ob,Orange Bar,Location,Bars & Food,#C2410C
+of,Orange Food,Location,Bars & Food,#C2410C
+yb,Yellow Bar,Location,Bars & Food,#C2410C
+yf,Yellow Food,Location,Bars & Food,#C2410C
+pb,Peroni Bar,Location,Bars & Food,#C2410C
+plb,Pirate Life Bar,Location,Bars & Food,#C2410C
+gb,Grey Bar,Location,Bars & Food,#C2410C
+gf,Grey Food,Location,Bars & Food,#C2410C
+bb,Blue Bar,Location,Bars & Food,#C2410C
+bf,Blue Food,Location,Bars & Food,#C2410C
+,,,,
+,Security Calls,,,
+rsa,Patron showing signs of intoxication. RSA check done,Incident,Security,
+soa,Patron showing signs of aggression,Incident,Security,
+sob,Patron behaviour check,Incident,Security,
+alpha,Patrons fighting,Incident,Security,
+bravo,Guard Injured,Incident,Security,
+,Patron being removed,Incident,Security,
+,,,,
+,Block Numbers,,,
+401,Block 401,Location,Blocks/400s,#4338CA
+402,Block 402,Location,Blocks/400s,#4338CA
+403,Block 403,Location,Blocks/400s,#4338CA
+404,Block 404,Location,Blocks/400s,#4338CA
+405,Block 405,Location,Blocks/400s,#4338CA
+406,Block 406,Location,Blocks/400s,#4338CA
+407,Block 407,Location,Blocks/400s,#4338CA
+301,Block 301,Location,Blocks/300s,#4338CA
+302,Block 302,Location,Blocks/300s,#4338CA
+303,Block 303,Location,Blocks/300s,#4338CA
+304,Block 304,Location,Blocks/300s,#4338CA
+305,Block 305,Location,Blocks/300s,#4338CA
+306,Block 306,Location,Blocks/300s,#4338CA
+307,Block 307,Location,Blocks/300s,#4338CA
+308,Block 308,Location,Blocks/300s,#4338CA
+309,Block 309,Location,Blocks/300s,#4338CA
+310,Block 310,Location,Blocks/300s,#4338CA
+311,Block 311,Location,Blocks/300s,#4338CA
+312,Block 312,Location,Blocks/300s,#4338CA
+313,Block 313,Location,Blocks/300s,#4338CA
+314,Block 314,Location,Blocks/300s,#4338CA
+315,Block 315,Location,Blocks/300s,#4338CA
+316,Block 316,Location,Blocks/300s,#4338CA
+317,Block 317,Location,Blocks/300s,#4338CA
+318,Block 318,Location,Blocks/300s,#4338CA
+319,Block 319,Location,Blocks/300s,#4338CA
+320,Block 320,Location,Blocks/300s,#4338CA
+321,Block 321,Location,Blocks/300s,#4338CA
+322,Block 322,Location,Blocks/300s,#4338CA
+323,Block 323,Location,Blocks/300s,#4338CA
+201,Block 201,Location,Blocks/200s,#4338CA
+202,Block 202,Location,Blocks/200s,#4338CA
+203,Block 203,Location,Blocks/200s,#4338CA
+204,Block 204,Location,Blocks/200s,#4338CA
+205,Block 205,Location,Blocks/200s,#4338CA
+206,Block 206,Location,Blocks/200s,#4338CA
+207,Block 207,Location,Blocks/200s,#4338CA
+208,Block 208,Location,Blocks/200s,#4338CA
+209,Block 209,Location,Blocks/200s,#4338CA
+210,Block 210,Location,Blocks/200s,#4338CA
+211,Block 211,Location,Blocks/200s,#4338CA
+212,Block 212,Location,Blocks/200s,#4338CA
+213,Block 213,Location,Blocks/200s,#4338CA
+214,Block 214,Location,Blocks/200s,#4338CA
+215,Block 215,Location,Blocks/200s,#4338CA
+216,Block 216,Location,Blocks/200s,#4338CA
+217,Block 217,Location,Blocks/200s,#4338CA
+218,Block 218,Location,Blocks/200s,#4338CA
+219,Block 219,Location,Blocks/200s,#4338CA
+220,Block 220,Location,Blocks/200s,#4338CA
+221,Block 221,Location,Blocks/200s,#4338CA
+222,Block 222,Location,Blocks/200s,#4338CA
+102,Block 102,Location,Blocks/100s,#4338CA
+103,Block 103,Location,Blocks/100s,#4338CA
+104,Block 104,Location,Blocks/100s,#4338CA
+105,Block 105,Location,Blocks/100s,#4338CA
+106,Block 106,Location,Blocks/100s,#4338CA
+108,Block 108,Location,Blocks/100s,#4338CA
+109,Block 109,Location,Blocks/100s,#4338CA
+110,Block 110,Location,Blocks/100s,#4338CA
+112,Block 112,Location,Blocks/100s,#4338CA
+113,Block 113,Location,Blocks/100s,#4338CA
+114,Block 114,Location,Blocks/100s,#4338CA
+115,Block 115,Location,Blocks/100s,#4338CA
+116,Block 116,Location,Blocks/100s,#4338CA
+119,Block 119,Location,Blocks/100s,#4338CA
+120,Block 120,Location,Blocks/100s,#4338CA
+121,Block 121,Location,Blocks/100s,#4338CA
+,,,,
+,RAC Titles,,,
+sm,Security Manager,Callsign,,#334155
+d,Director,Callsign,,#334155
+em,Event Manager,Callsign,,#334155
+msg,Market Street Gate,Location,Venue Areas,#57534E
+,,,,
+,Escalator 1,Location,Lifts & Escalators,#334155
+,Escalator 2,Location,Lifts & Escalators,#334155
+,Escalator 3,Location,Lifts & Escalators,#334155
+,Escalator 4,Location,Lifts & Escalators,#334155
+,Escalator 5,Location,Lifts & Escalators,#334155
