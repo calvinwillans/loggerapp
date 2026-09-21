@@ -29,17 +29,19 @@ const SEND_TIMEOUT_MS = 12000;
 const LOCATION_GROUP_ORDER = [
   "Internal", "External", "Function Areas",
   "Level 1", "Level 2", "Level 3", "Level 4", "Level 5",
-  "Catwalk", "Block", "Toilets", "People",
+  "Catwalk", "Block", "Toilets",
 ];
 
 let menu = { callsign: [], department: [], incident: [], location: [] };
 let deptColour = {};   // lower-case department label -> colour
 let locTree = null;
+let callTree = null;   // callsigns can be grouped into folders too (e.g. "People")
 
 let sel = emptySelection();
 let skipped = {};
 let stage = "callsign";
-let locPath = [];      // names of the location groups drilled into
+// Folder names drilled into on the callsign and location screens.
+let paths = { callsign: [], location: [] };
 let autoLocation = false; // true when Location was filled in from the callsign
 let busy = false;
 let busyTimer = null;
@@ -65,7 +67,10 @@ function start(t) {
   $("clearBtn").addEventListener("click", clearAll);
   $("refreshBtn").addEventListener("click", requestMenu);
   $("skipBtn").addEventListener("click", skipStage);
-  $("backBtn").addEventListener("click", () => { locPath.pop(); render(); });
+  $("backBtn").addEventListener("click", () => {
+    if (paths[stage]) paths[stage].pop();
+    render();
+  });
   render();
   requestMenu();
   $("logInput").focus();
@@ -147,6 +152,7 @@ function ingestMenu(rows) {
     if (!inc.colour) inc.colour = deptColour[inc.group.toLowerCase()] || "";
   }
   locTree = buildTree(menu.location);
+  callTree = buildTree(menu.callsign);
   menuLoaded = true;
 
   // Re-point any current picks at the fresh items so labels/colours update.
@@ -202,10 +208,16 @@ function countItems(node) {
   return node.items.length + node.children.reduce((n, c) => n + countItems(c), 0);
 }
 
-function currentLocNode() {
-  let node = locTree;
-  for (const name of locPath) {
-    if (!node || !node.childMap[name]) return locTree;
+function treeFor(key) {
+  return key === "location" ? locTree : key === "callsign" ? callTree : null;
+}
+
+/** The folder currently open on the callsign or location screen. */
+function currentNode(key) {
+  const root = treeFor(key);
+  let node = root;
+  for (const name of paths[key]) {
+    if (!node || !node.childMap[name]) return root;
     node = node.childMap[name];
   }
   return node;
@@ -268,10 +280,13 @@ function pick(key, item) {
     sel.incident = null;
   }
   if (key === "location") {
-    locPath = [];
+    paths.location = [];
     autoLocation = false;
   }
-  if (key === "callsign") applyHome(item);
+  if (key === "callsign") {
+    paths.callsign = [];
+    applyHome(item);
+  }
   advanceFrom(key);
 }
 
@@ -293,7 +308,7 @@ function skipStage() {
   sel[stage] = null;
   skipped[stage] = true;
   if (stage === "location") {
-    locPath = [];
+    paths.location = [];
     autoLocation = false;
   }
   advanceFrom(stage);
@@ -306,7 +321,8 @@ function advanceFrom(key) {
     const s = STAGES[(start + step) % STAGES.length].key;
     if (!sel[s] && !skipped[s] && applicable(s)) {
       stage = s;
-      if (s === "location") locPath = startPath();
+      if (s === "location") paths.location = startPath();
+      if (s === "callsign") paths.callsign = [];
       render();
       $("logInput").focus();
       return;
@@ -319,14 +335,15 @@ function advanceFrom(key) {
 
 function goToStage(key) {
   stage = key;
-  if (key === "location") locPath = startPath();
+  if (key === "location") paths.location = startPath();
+  if (key === "callsign") paths.callsign = [];
   render();
 }
 
 function resetEntry() {
   sel = emptySelection();
   skipped = {};
-  locPath = [];
+  paths = { callsign: [], location: [] };
   autoLocation = false;
   stage = "callsign";
   $("logInput").value = "";
@@ -489,7 +506,7 @@ function renderStage() {
   const title = $("stageTitle");
   grid.innerHTML = "";
   grid.classList.remove("compact");
-  $("backBtn").hidden = !(stage === "location" && locPath.length > 0);
+  $("backBtn").hidden = !(paths[stage] && paths[stage].length > 0);
   $("skipBtn").hidden = stage === "done";
 
   if (!menuLoaded) {
@@ -505,18 +522,18 @@ function renderStage() {
 
   const def = STAGES.find((s) => s.key === stage);
   title.textContent = def.prompt;
-  if (stage === "location" && locPath.length) {
+  if (paths[stage] && paths[stage].length) {
     const path = document.createElement("span");
     path.className = "path";
-    path.textContent = "  " + locPath.join(" › ");
+    path.textContent = "  " + paths[stage].join(" › ");
     title.appendChild(path);
   }
 
   let items = [];
   let folders = [];
   if (stage === "incident") items = incidentsFor(sel.department);
-  else if (stage === "location") {
-    const node = currentLocNode();
+  else if (treeFor(stage)) {
+    const node = currentNode(stage);
     folders = node.children;
     items = node.items;
   } else items = menu[stage];
@@ -529,11 +546,12 @@ function renderStage() {
   }
 
   for (const f of folders) {
-    // A group holding just one location picks it straight away.
+    // A folder holding just one button picks it straight away.
     const only = f.children.length === 0 && f.items.length === 1 ? f.items[0] : null;
+    const key = stage;
     const t = tile(f.name, "", f.colour, () => {
-      if (only) pick("location", only);
-      else { locPath.push(f.name); render(); }
+      if (only) pick(key, only);
+      else { paths[key].push(f.name); render(); }
     });
     t.classList.add("folder");
     const count = document.createElement("span");
