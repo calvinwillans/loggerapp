@@ -29,7 +29,7 @@ const SEND_TIMEOUT_MS = 12000;
 const LOCATION_GROUP_ORDER = [
   "Internal", "External", "Function Areas",
   "Level 1", "Level 2", "Level 3", "Level 4", "Level 5",
-  "Catwalk", "Block", "Toilets",
+  "Catwalk", "Block", "Toilets", "People",
 ];
 
 let menu = { callsign: [], department: [], incident: [], location: [] };
