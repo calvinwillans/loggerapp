@@ -30,7 +30,13 @@ const MILESTONE_MAP = {
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
   C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
+  C104: { b: "Base", c: "All Call", d: "", e: "Level 4 whitelevel checks completed" },
+  C105: { b: "Base", c: "All Call", d: "", e: "Level 3 whitelevel checks completed" },
+  C106: { b: "Base", c: "All Call", d: "", e: "Level 2 whitelevel checks completed" },
+  C107: { b: "Base", c: "All Call", d: "", e: "Level 1 whitelevel checks completed" },
+  C108: { b: "Base", c: "All Call", d: "", e: "Ground floor whitelevel checks completed" },
   C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C115: { b: "Base", c: "", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
