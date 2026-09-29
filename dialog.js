@@ -141,7 +141,7 @@ function onParentMessage(raw) {
  * Button data
  * ========================================================================*/
 
-/** rows: [code, label, type, group, colour, home, row][] */
+/** rows: [code, label, type, group, colour, home, row, parentRow][] */
 function ingestMenu(rows) {
   menu = { callsign: [], department: [], incident: [], location: [] };
   for (const r of rows) {
@@ -153,7 +153,8 @@ function ingestMenu(rows) {
       group: r[3] || "",
       colour: r[4] || "",
       home: r[5] || "",
-      row: rowNumber(r[6]),
+      row: rowNumber(r[6]),        // column G: this button's own row
+      parentRow: rowNumber(r[7]),  // column H: the row of the folder it sits in
       type,
     });
   }
@@ -193,7 +194,7 @@ function buildTree(items) {
         if (!node.childMap[part]) {
           const child = newNode(part);
           child.colour = item.colour;
-          child.row = item.row; // a folder takes its row from its first button
+          child.row = item.parentRow; // column H of the folder's first button
           node.childMap[part] = child;
           node.children.push(child);
         }
@@ -217,7 +218,11 @@ function newNode(name) {
   return { name, colour: "", row: null, children: [], childMap: {}, items: [] };
 }
 
-/** Inputs column G: a number putting this button on a particular row. */
+/**
+ * Row numbers from Inputs columns G and H. G is the row this button sits on
+ * when its own screen is drawn; H is the row its folder button sits on, one
+ * screen up.
+ */
 function rowNumber(value) {
   const n = parseFloat((value === undefined || value === null ? "" : value).toString().trim());
   return isNaN(n) ? null : n;

@@ -8,7 +8,8 @@ const INPUTS_TYPE_COL = 2;   // C - Callsign / Department / Incident / Location
 const INPUTS_GROUP_COL = 3;  // D - group path, e.g. "Blocks/200s" or "Level 2;Toilets"
 const INPUTS_COLOUR_COL = 4; // E - hex colour, e.g. #1D4ED8
 const INPUTS_HOME_COL = 5;   // F - callsigns only: a location label, or a location folder path
-const INPUTS_ROW_COL = 6;    // G - optional row number, to force buttons onto a shared row
+const INPUTS_ROW_COL = 6;    // G - row number for this button on its own screen
+const INPUTS_PARENT_ROW_COL = 7; // H - row number for the folder button this one sits in
 const BUTTON_TYPES = ["callsign", "department", "incident", "location"];
 
 // Dialog size, as a percentage of the screen.
@@ -592,7 +593,7 @@ async function sendMenu() {
   }
 }
 
-/** Returns [code, label, type, group, colour, home, row] for every Inputs row with a Button type. */
+/** Returns [code, label, type, group, colour, home, row, parentRow] for every Inputs row with a Button type. */
 async function readButtonRows() {
   return await Excel.run(async (context) => {
     const inputsSheet = context.workbook.worksheets.getItemOrNullObject(INPUTS_SHEET);
@@ -622,6 +623,7 @@ async function readButtonRows() {
         cell(row, INPUTS_COLOUR_COL),
         cell(row, INPUTS_HOME_COL),
         cell(row, INPUTS_ROW_COL),
+        cell(row, INPUTS_PARENT_ROW_COL),
       ]);
     }
     return rows;
