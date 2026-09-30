@@ -4,9 +4,26 @@ const DIALOG_URL = BASE_URL + "/dialog.html";
 
 const INPUTS_SHEET = "Inputs";
 // Inputs columns used to build the dialog's buttons (A = code, B = label).
+// Columns are found by their header text in row 1 where possible, so
+// inserting a column on Inputs can't knock the mapping out of line. The
+// numbers below are only the fallback when a header isn't found.
 const INPUTS_TYPE_COL = 2;   // C - Callsign / Department / Incident / Location
 const INPUTS_GROUP_COL = 3;  // D - group path, e.g. "Blocks/200s" or "Level 2;Toilets"
 const INPUTS_COLOUR_COL = 4; // E - hex colour, e.g. #1D4ED8
+
+// Header text this add-in looks for, per column. Matching ignores case,
+// spaces and punctuation, so "Button Row", "button-row" and "ButtonRow" are
+// all the same thing.
+const INPUTS_HEADERS = {
+  code: ["code", "shorthand"],
+  label: ["label", "expansion"],
+  type: ["buttontype", "type"],
+  group: ["buttongroup", "group", "folder"],
+  colour: ["colour", "color"],
+  home: ["homelocation", "home", "defaultlocation"],
+  row: ["buttonrow", "row"],
+  parentRow: ["parentrow", "folderrow", "parentbuttonrow"],
+};
 const INPUTS_HOME_COL = 5;   // F - callsigns only: a location label, or a location folder path
 const INPUTS_ROW_COL = 6;    // G - row number for this button on its own screen
 const INPUTS_PARENT_ROW_COL = 7; // H - row number for the folder button this one sits in
@@ -570,16 +587,16 @@ function sendToDialog(obj) {
 
 /** Reads the button rows off Inputs and sends them to the dialog in chunks. */
 async function sendMenu() {
-  let rows = [];
+  let result = { rows: [], columns: "" };
   try {
-    rows = await readButtonRows();
+    result = await readButtonRows();
   } catch (err) {
     console.error(err);
     sendToDialog({ kind: "status", ok: false, text: "Error reading Inputs: " + (err.message || err) });
     return;
   }
 
-  const json = JSON.stringify(rows);
+  const json = JSON.stringify(result);
   const id = Date.now().toString(36);
   const n = Math.max(1, Math.ceil(json.length / MESSAGE_CHUNK_CHARS));
   for (let i = 0; i < n; i++) {
@@ -591,6 +608,48 @@ async function sendMenu() {
       data: json.slice(i * MESSAGE_CHUNK_CHARS, (i + 1) * MESSAGE_CHUNK_CHARS),
     });
   }
+}
+
+/** Normalises header text so "Button Row" and "button_row" match. */
+function headerKey(text) {
+  return (text === null || text === undefined ? "" : text.toString()).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Works out which column is which, by header text first and fixed position
+ * second, and returns the indexes plus a line describing what it found (so a
+ * mismatch is visible instead of silently shifting everything sideways).
+ */
+function mapInputsColumns(headerRow, offset) {
+  const fallback = {
+    code: 0,
+    label: 1,
+    type: INPUTS_TYPE_COL,
+    group: INPUTS_GROUP_COL,
+    colour: INPUTS_COLOUR_COL,
+    home: INPUTS_HOME_COL,
+    row: INPUTS_ROW_COL,
+    parentRow: INPUTS_PARENT_ROW_COL,
+  };
+
+  const found = {};
+  for (let c = 0; c < headerRow.length; c++) {
+    const key = headerKey(headerRow[c]);
+    if (key === "") continue;
+    for (const field of Object.keys(INPUTS_HEADERS)) {
+      if (found[field] === undefined && INPUTS_HEADERS[field].indexOf(key) !== -1) found[field] = c + offset;
+    }
+  }
+
+  const cols = {};
+  const described = [];
+  for (const field of Object.keys(fallback)) {
+    const byHeader = found[field] !== undefined;
+    cols[field] = byHeader ? found[field] : fallback[field];
+    described.push(`${field}=${columnIndexToLetter(cols[field])}${byHeader ? "" : " (assumed)"}`);
+  }
+  cols.description = described.join(", ");
+  return cols;
 }
 
 /** Returns [code, label, type, group, colour, home, row, parentRow] for every Inputs row with a Button type. */
@@ -610,23 +669,26 @@ async function readButtonRows() {
     const off = used.columnIndex;
     const cell = (row, col) => ((row[col - off] === undefined ? "" : row[col - off]) || "").toString().trim();
 
+    const cols = mapInputsColumns(used.values[0] || [], off);
+    console.log("Inputs columns: " + cols.description);
+
     const rows = [];
     for (const row of used.values) {
-      const type = cell(row, INPUTS_TYPE_COL);
-      const label = cell(row, 1);
+      const type = cell(row, cols.type);
+      const label = cell(row, cols.label);
       if (!label || BUTTON_TYPES.indexOf(type.toLowerCase()) === -1) continue;
       rows.push([
-        cell(row, 0),
+        cell(row, cols.code),
         label,
         type,
-        cell(row, INPUTS_GROUP_COL),
-        cell(row, INPUTS_COLOUR_COL),
-        cell(row, INPUTS_HOME_COL),
-        cell(row, INPUTS_ROW_COL),
-        cell(row, INPUTS_PARENT_ROW_COL),
+        cell(row, cols.group),
+        cell(row, cols.colour),
+        cell(row, cols.home),
+        cell(row, cols.row),
+        cell(row, cols.parentRow),
       ]);
     }
-    return rows;
+    return { rows: rows, columns: cols.description };
   });
 }
 

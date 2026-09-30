@@ -114,7 +114,8 @@ function onParentMessage(raw) {
     if (buf.filter((x) => x !== undefined).length === msg.n) {
       delete chunkBuffer[msg.id];
       try {
-        ingestMenu(JSON.parse(buf.join("")));
+        const payload = JSON.parse(buf.join(""));
+        ingestMenu(Array.isArray(payload) ? payload : payload.rows || [], Array.isArray(payload) ? "" : payload.columns || "");
       } catch (e) {
         setStatus("Error: couldn't read the button data. Click Reload buttons.", "err");
       }
@@ -142,7 +143,7 @@ function onParentMessage(raw) {
  * ========================================================================*/
 
 /** rows: [code, label, type, group, colour, home, row, parentRow][] */
-function ingestMenu(rows) {
+function ingestMenu(rows, columns) {
   menu = { callsign: [], department: [], incident: [], location: [] };
   for (const r of rows) {
     const type = (r[2] || "").toLowerCase();
@@ -174,7 +175,12 @@ function ingestMenu(rows) {
   }
 
   const total = rows.length;
-  setStatus(total ? "Ready." : "No buttons found. Fill in the Button type column on Inputs.", total ? "ok" : "err");
+  // Showing the column mapping makes a shifted column obvious straight away.
+  const where = columns ? "  [" + columns + "]" : "";
+  setStatus(
+    total ? `Ready. ${total} buttons.${where}` : "No buttons found. Fill in the Button type column on Inputs." + where,
+    total ? "ok" : "err"
+  );
   render();
   renderRecents();
 }
@@ -603,15 +609,21 @@ function renderStage() {
   // buttons sharing a number sit on one row, and the rows come out in
   // numerical order. Without them, banded screens break on colour instead.
   const numbered = cells.some((c) => c.row !== null);
-  const banded =
-    numbered || BANDED_STAGES.indexOf(stage) !== -1 || (paths[stage] && paths[stage].length > 0);
   if (numbered) {
     cells = cells
       .map((c, i) => ({ c, i }))
       .sort((a, b) => (a.c.row === null ? Infinity : a.c.row) - (b.c.row === null ? Infinity : b.c.row) || a.i - b.i)
       .map((x) => x.c);
   }
-  const keyOf = (cell) => (numbered && cell.row !== null ? "row:" + cell.row : cell.colour);
+  const colourBanded = BANDED_STAGES.indexOf(stage) !== -1 || (paths[stage] && paths[stage].length > 0);
+  const keyOf = (cell) => {
+    if (cell.row !== null) return "row:" + cell.row;
+    // Buttons with no number keep their old behaviour: banded by colour where
+    // that screen bands by colour, otherwise all flowing together.
+    return colourBanded ? cell.colour : "unnumbered";
+  };
+
+  const banded = numbered || colourBanded;
 
   let band = null;
   let bandColour = null;
