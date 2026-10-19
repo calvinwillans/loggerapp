@@ -3,6 +3,18 @@ const BASE_URL = "https://calvinwillans.github.io/loggerapp";
 const DIALOG_URL = BASE_URL + "/dialog.html";
 
 const INPUTS_SHEET = "Inputs";
+// Inputs columns used to build the dialog's buttons (A = code, B = label).
+const INPUTS_TYPE_COL = 2;   // C - Callsign / Department / Incident / Location
+const INPUTS_GROUP_COL = 3;  // D - group path, e.g. "Blocks/200s" or "Level 2;Toilets"
+const INPUTS_COLOUR_COL = 4; // E - hex colour, e.g. #1D4ED8
+const INPUTS_HOME_COL = 5;   // F - callsigns only: a location label, or a location folder path
+const BUTTON_TYPES = ["callsign", "department", "incident", "location"];
+
+// Dialog size, as a percentage of the screen.
+const DIALOG_WIDTH = 50;
+const DIALOG_HEIGHT = 75;
+// Office caps each message to the dialog, so the button data goes in pieces.
+const MESSAGE_CHUNK_CHARS = 15000;
 const LOG_SHEET = "Log";
 const LOG_FIRST_DATA_ROW = 8; // first entry always lands here, matching the template
 const LOG_MAX_ROW = 5000; // generous ceiling when scanning for the next empty row
@@ -18,9 +30,9 @@ const STATE_SHEET = "_LoggerState";
 // populated. Add more entries here in the same shape as they come up -
 // leave any column "" to leave it blank on the logged row.
 const MILESTONE_MAP = {
-  E14: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
-  F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" }, 
+  F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
+  E50: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
   E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
   E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
@@ -30,13 +42,13 @@ const MILESTONE_MAP = {
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
   C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  C105: { b: "Base", c: "All Call", d: "", e: "Level 4 whitelevel checks completed" },
-  C106: { b: "Base", c: "All Call", d: "", e: "Level 3 whitelevel checks completed" },
-  C107: { b: "Base", c: "All Call", d: "", e: "Level 2 whitelevel checks completed" },
-  C108: { b: "Base", c: "All Call", d: "", e: "Level 1 whitelevel checks completed" },
-  C109: { b: "Base", c: "All Call", d: "", e: "Ground floor whitelevel checks completed" },
-  C110: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
-  C116: { b: "Base", c: "", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
+  C104: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
+  C105: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
+  C106: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
+  C107: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C108: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
+  C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C115: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
@@ -44,8 +56,14 @@ let dialog = null;
 // Runs once, as soon as this page loads. With the shared runtime + a "long"
 // lifetime in the manifest, that's now on workbook open rather than only
 // when the ribbon button is clicked or a dialog message arrives.
+let watchersRegistered = false;
+
 Office.onReady(async (info) => {
   if (info.host === Office.HostType.Excel) {
+    // Office can run onReady more than once in a session. Registering the
+    // same onChanged handler twice means every edit sweeps twice.
+    if (watchersRegistered) return;
+    watchersRegistered = true;
     try {
       await Office.addin.setStartupBehavior(Office.StartupBehavior.load);
     } catch (err) {
@@ -53,6 +71,8 @@ Office.onReady(async (info) => {
     }
     await registerDepartmentWatcher();
     await registerMilestoneWatcher();
+    const opening = await sweepMilestones();
+    console.log("On open: " + sweepSummary(opening));
   }
 });
 
@@ -174,12 +194,8 @@ function columnIndexToLetter(index) {
 }
 
 /**
- * Registers a listener on "Event Checks": when a mapped cell gets a value,
- * appends the corresponding row to Log. Each cell only fires once - once
- * logged, it's recorded on the hidden "_LoggerState" sheet so re-editing
- * that cell later (fixing a typo, say) doesn't create a duplicate row.
- * Delete the matching row on _LoggerState to let a cell fire again, or
- * clear the whole sheet to reset between events.
+ * Registers a listener on "Event Checks". Any edit there triggers a sweep of
+ * every mapped cell, so it doesn't matter which cell was touched.
  */
 async function registerMilestoneWatcher() {
   await Excel.run(async (context) => {
@@ -198,56 +214,175 @@ async function registerMilestoneWatcher() {
   });
 }
 
-async function onMilestoneSheetChanged(eventArgs) {
-  await Excel.run(async (context) => {
-    const checksSheet = context.workbook.worksheets.getItem(MILESTONE_SHEET);
-
-    const changedRange = checksSheet.getRange(eventArgs.address.split("!").pop());
-    changedRange.load(["rowIndex", "rowCount", "columnIndex", "columnCount"]);
-    await context.sync();
-
-    // Which mapped cells does this edit touch?
-    const touched = Object.keys(MILESTONE_MAP).filter((cellAddress) => {
-      const { row, col } = a1ToRowCol(cellAddress);
-      const withinRows = row >= changedRange.rowIndex && row < changedRange.rowIndex + changedRange.rowCount;
-      const withinCols = col >= changedRange.columnIndex && col < changedRange.columnIndex + changedRange.columnCount;
-      return withinRows && withinCols;
-    });
-    if (touched.length === 0) return;
-
-    const alreadyLogged = await getLoggedMilestones(context);
-
-    for (const cellAddress of touched) {
-      if (alreadyLogged.has(cellAddress.toUpperCase())) continue;
-
-      const cell = checksSheet.getRange(cellAddress);
-      cell.load("text");
-      await context.sync();
-      const displayValue = (cell.text[0][0] || "").toString().trim();
-      if (displayValue === "" || isNotApplicable(displayValue)) continue; // cleared or marked N/A - not populated
-
-      await appendMilestoneRow(context, MILESTONE_MAP[cellAddress]);
-      await markMilestoneLogged(context, cellAddress);
-    }
-  });
+async function onMilestoneSheetChanged() {
+  const result = await sweepMilestones();
+  if (result.error) console.error("Milestone sweep failed:", result.error);
 }
 
-async function appendMilestoneRow(context, mapping) {
-  const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
-  logSheet.load("isNullObject");
-  await context.sync();
-  if (logSheet.isNullObject) {
-    console.error(`"${LOG_SHEET}" sheet not found - milestone not logged.`);
-    return;
+/**
+ * One comparable form for a Details string: non-breaking spaces become
+ * ordinary ones, runs of whitespace collapse, case is ignored. Without this,
+ * a double space or a stray nbsp makes a row look "not yet logged".
+ */
+function normaliseDetails(value) {
+  return (value === null || value === undefined ? "" : value.toString())
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Excel fires onChanged for every edit, and a recalculation on "Event Checks"
+// can fire it again while a sweep is still running. Two sweeps in flight at
+// once both read the Log before either writes, so both decide the same
+// milestone is missing and both write it. These two guards make the sweep
+// single-file: concurrent callers share the running sweep, and one extra
+// pass runs afterwards so a change made mid-sweep still gets picked up.
+let sweepInFlight = null;
+let sweepRequestedAgain = false;
+
+async function sweepMilestones() {
+  if (sweepInFlight) {
+    sweepRequestedAgain = true;
+    return sweepInFlight;
   }
 
-  const nextRow = await findNextLogRow(context, logSheet);
-  const timeString = new Date().toLocaleTimeString("en-AU", { hour12: false, timeZone: "Australia/Perth" });
+  sweepInFlight = runMilestoneSweep();
+  let result;
+  try {
+    result = await sweepInFlight;
+  } finally {
+    sweepInFlight = null;
+  }
 
-  logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [
-    [timeString, mapping.b || "", mapping.c || "", mapping.d || "", mapping.e || ""],
-  ];
-  await context.sync();
+  if (sweepRequestedAgain) {
+    sweepRequestedAgain = false;
+    const second = await sweepMilestones();
+    return { checked: second.checked, logged: result.logged + second.logged, error: result.error || second.error, report: second.report };
+  }
+  return result;
+}
+
+/**
+ * Checks EVERY cell in MILESTONE_MAP and logs any that are filled in but not
+ * yet in the Log. Deliberately independent of the change event: it also runs
+ * on workbook open, from the ribbon, and after each dialog entry, so a
+ * milestone filled by formula, pasted in, or entered while the add-in was
+ * asleep still gets picked up.
+ *
+ * Duplicates are prevented by matching against the Details text already in
+ * the Log (column E), so there is no hidden state sheet to create, lose, or
+ * reset - which also means it works in a workbook with protected structure.
+ */
+async function runMilestoneSweep() {
+  try {
+    return await Excel.run(async (context) => {
+      const checksSheet = context.workbook.worksheets.getItemOrNullObject(MILESTONE_SHEET);
+      const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+      checksSheet.load("isNullObject");
+      logSheet.load("isNullObject");
+      await context.sync();
+
+      if (checksSheet.isNullObject) return { checked: 0, logged: 0, error: `"${MILESTONE_SHEET}" sheet not found.` };
+      if (logSheet.isNullObject) return { checked: 0, logged: 0, error: `"${LOG_SHEET}" sheet not found.` };
+
+      // Read every mapped cell in one round trip.
+      const addresses = Object.keys(MILESTONE_MAP);
+      const cells = addresses.map((a) => {
+        const r = checksSheet.getRange(a);
+        r.load("text, values");  // text for a real time, values as the backstop
+        return r;
+      });
+
+      // What's already in the Log, so nothing gets written twice. This reads
+      // VALUES, not text: text is what the cell displays, and Excel clips that
+      // to the column width, so a long Details string came back cut short and
+      // never matched the full string being compared against it - which is why
+      // the longer milestones logged again on every sweep.
+      const detailsRange = logSheet.getRange(`E${LOG_FIRST_DATA_ROW}:E${LOG_MAX_ROW}`);
+      detailsRange.load("values");
+      const timeRange = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
+      timeRange.load("values");
+      await context.sync();
+
+      const already = new Set();
+      for (const row of detailsRange.values) {
+        const text = normaliseDetails(row[0]);
+        if (text !== "") already.add(text);
+      }
+
+      let nextRow = LOG_MAX_ROW + 1;
+      const timeValues = timeRange.values;
+      for (let i = 0; i < timeValues.length; i++) {
+        const cell = timeValues[i][0];
+        if (cell === null || cell === undefined || cell.toString().trim() === "") {
+          nextRow = LOG_FIRST_DATA_ROW + i;
+          break;
+        }
+      }
+
+      const timeString = new Date().toLocaleTimeString("en-AU", { hour12: false, timeZone: "Australia/Perth" });
+      let logged = 0;
+      const report = [];
+
+      addresses.forEach((address, i) => {
+        // A cell counts as filled if either what it shows or what it holds is
+        // non-blank, so a time entered any which way is recognised.
+        const shown = (cells[i].text[0][0] === null || cells[i].text[0][0] === undefined ? "" : cells[i].text[0][0]).toString().trim();
+        const held = (cells[i].values[0][0] === null || cells[i].values[0][0] === undefined ? "" : cells[i].values[0][0]).toString().trim();
+        const seen = shown !== "" ? shown : held;
+
+        if (seen === "" || isNotApplicable(shown) || isNotApplicable(held)) {
+          report.push(`${address}: empty, skipped`);
+          return;
+        }
+
+        const mapping = MILESTONE_MAP[address];
+        const details = (mapping.e || "").trim();
+        const key = normaliseDetails(details);
+        if (key === "" || already.has(key)) {
+          report.push(`${address}: "${seen}" already logged, skipped`);
+          return;
+        }
+
+        if (nextRow > LOG_MAX_ROW) {
+          report.push(`${address}: Log is full`);
+          return;
+        }
+
+        logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [
+          [timeString, mapping.b || "", mapping.c || "", mapping.d || "", details],
+        ];
+        report.push(`${address}: "${seen}" -> logged to row ${nextRow}`);
+        already.add(key);
+        nextRow++;
+        logged++;
+      });
+
+      if (logged > 0) await context.sync();
+      return { checked: addresses.length, logged: logged, error: null, report: report };
+    });
+  } catch (err) {
+    console.error("sweepMilestones failed:", err);
+    return { checked: 0, logged: 0, error: err.message || String(err), report: [] };
+  }
+}
+
+/** Wording for the dialog's status line. */
+function sweepSummary(result) {
+  if (result.error) return "Milestone check failed: " + result.error;
+  if (result.logged === 0) return `${result.checked} milestones checked, none new.`;
+  return `${result.checked} milestones checked, ${result.logged} logged.`;
+}
+
+/** Ribbon button: check the milestones now and report in the console. */
+async function syncMilestones(event) {
+  const result = await sweepMilestones();
+  console.log(sweepSummary(result));
+  // Full per-cell reasoning, so a milestone that behaves oddly can be traced.
+  for (const line of result.report || []) console.log("  " + line);
+  sendToDialog({ kind: "status", ok: !result.error, text: sweepSummary(result) });
+  if (event) event.completed();
 }
 
 /** Same "next empty row" scan handleLogEntry uses, kept separate so this path can never affect the dialog's own logging. */
@@ -263,46 +398,6 @@ async function findNextLogRow(context, logSheet) {
   return LOG_MAX_ROW + 1;
 }
 
-async function getLoggedMilestones(context) {
-  const stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
-  stateSheet.load("isNullObject");
-  await context.sync();
-  if (stateSheet.isNullObject) return new Set();
-
-  const used = stateSheet.getUsedRangeOrNullObject();
-  used.load(["isNullObject", "values"]);
-  await context.sync();
-  if (used.isNullObject) return new Set();
-
-  const logged = new Set();
-  for (const row of used.values) {
-    const key = (row[0] || "").toString().trim().toUpperCase();
-    if (key && key !== "LOGGEDMILESTONES") logged.add(key);
-  }
-  return logged;
-}
-
-async function markMilestoneLogged(context, cellAddress) {
-  let stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
-  stateSheet.load("isNullObject");
-  await context.sync();
-
-  if (stateSheet.isNullObject) {
-    stateSheet = context.workbook.worksheets.add(STATE_SHEET);
-    stateSheet.getRange("A1").values = [["LoggedMilestones"]];
-    stateSheet.visibility = Excel.SheetVisibility.hidden;
-    await context.sync();
-  }
-
-  const used = stateSheet.getUsedRangeOrNullObject();
-  used.load(["isNullObject", "rowIndex", "rowCount"]);
-  await context.sync();
-
-  const nextIndex = used.isNullObject ? 1 : used.rowIndex + used.rowCount; // 0-based
-  stateSheet.getRangeByIndexes(nextIndex, 0, 1, 1).values = [[cellAddress.toUpperCase()]];
-  await context.sync();
-}
-
 function a1ToRowCol(address) {
   const match = address.toUpperCase().match(/^([A-Z]+)(\d+)$/);
   const row = parseInt(match[2], 10) - 1;
@@ -316,11 +411,10 @@ function isNotApplicable(text) {
 }
 
 /**
- * Ribbon button handler. Clears the hidden "_LoggerState" sheet that tracks
- * which "Event Checks" milestone cells have already fired, so any cell that
- * was cleared and repopulated (a correction) - or every cell, if the sheet
- * was just wiped for a new event - will log again next time it's edited.
- * Does NOT touch anything already written to Log.
+ * Ribbon button handler, kept for the existing button. Milestones are now
+ * deduped against the Log itself, so there is nothing to reset: to make a
+ * milestone log again, clear its Details text from the Log. This also
+ * removes the old hidden "_LoggerState" sheet if one is still lying around.
  */
 async function resetMilestoneLog(event) {
   try {
@@ -328,25 +422,21 @@ async function resetMilestoneLog(event) {
       const stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
       stateSheet.load("isNullObject");
       await context.sync();
-
       if (!stateSheet.isNullObject) {
         stateSheet.delete();
         await context.sync();
       }
-      // Nothing to do if it doesn't exist yet - already reset.
     });
   } catch (err) {
-    console.error("resetMilestoneLog failed:", err);
+    // Deleting can fail if the workbook structure is protected. Harmless now.
+    console.error("resetMilestoneLog:", err);
   }
-  event.completed();
+  const result = await sweepMilestones();
+  console.log("Reset: " + sweepSummary(result));
+  sendToDialog({ kind: "status", ok: !result.error, text: sweepSummary(result) });
+  if (event) event.completed();
 }
 
-Office.actions.associate("resetMilestoneLog", resetMilestoneLog);
-
-/**
- * Ribbon button handler. Opens the floating logger dialog. If it's already
- * open, does nothing - there's only ever one at a time.
- */
 function openLogger(event) {
   if (dialog) {
     event.completed();
@@ -355,7 +445,7 @@ function openLogger(event) {
 
   Office.context.ui.displayDialogAsync(
     DIALOG_URL,
-    { height: 20, width: 28, promptBeforeOpen: false },
+    { height: DIALOG_HEIGHT, width: DIALOG_WIDTH, promptBeforeOpen: false },
     (asyncResult) => {
       if (asyncResult.status === Office.AsyncResultStatus.Failed) {
         console.error(`Dialog failed to open: ${asyncResult.error.message}`);
@@ -365,11 +455,10 @@ function openLogger(event) {
 
       dialog = asyncResult.value;
 
-      // The dialog sends the raw shorthand line here every time the user
-      // presses Enter. This page (not the dialog) does the Excel.run work.
+      // Everything the dialog asks for arrives here. This page (not the
+      // dialog) does all the Excel.run work.
       dialog.addEventHandler(Office.EventType.DialogMessageReceived, async (arg) => {
-        const status = await handleLogEntry(arg.message);
-        dialog.messageChild(status);
+        await routeDialogMessage(arg.message);
       });
 
       // If the user closes the floating box, forget the reference so the
@@ -383,10 +472,145 @@ function openLogger(event) {
   );
 }
 
+/**
+ * Dialog messages are JSON: { kind: "ready" | "text" | "entry", ... }.
+ * A plain string (from an older cached dialog) is treated as shorthand.
+ */
+async function routeDialogMessage(raw) {
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch (e) {
+    msg = { kind: "text", text: raw };
+  }
+
+  if (msg.kind === "ready") {
+    await sendMenu();
+    return;
+  }
+
+  let status;
+  if (msg.kind === "entry") {
+    status = await handleButtonEntry(msg.fields || []);
+  } else {
+    status = await handleLogEntry(msg.text || "");
+  }
+
+  // Catch up on any milestone filled in since the last entry.
+  const sweep = await sweepMilestones();
+  if (sweep.logged > 0 || sweep.error) status += "  |  " + sweepSummary(sweep);
+
+  sendToDialog({ kind: "status", ok: !/^error/i.test(status), text: status });
+}
+
+function sendToDialog(obj) {
+  if (!dialog) return;
+  try {
+    dialog.messageChild(JSON.stringify(obj));
+  } catch (err) {
+    console.error("messageChild failed:", err);
+  }
+}
+
+/** Reads the button rows off Inputs and sends them to the dialog in chunks. */
+async function sendMenu() {
+  let rows = [];
+  try {
+    rows = await readButtonRows();
+  } catch (err) {
+    console.error(err);
+    sendToDialog({ kind: "status", ok: false, text: "Error reading Inputs: " + (err.message || err) });
+    return;
+  }
+
+  const json = JSON.stringify(rows);
+  const id = Date.now().toString(36);
+  const n = Math.max(1, Math.ceil(json.length / MESSAGE_CHUNK_CHARS));
+  for (let i = 0; i < n; i++) {
+    sendToDialog({
+      kind: "menuChunk",
+      id: id,
+      i: i,
+      n: n,
+      data: json.slice(i * MESSAGE_CHUNK_CHARS, (i + 1) * MESSAGE_CHUNK_CHARS),
+    });
+  }
+}
+
+/** Returns [code, label, type, group, colour, home] for every Inputs row with a Button type. */
+async function readButtonRows() {
+  return await Excel.run(async (context) => {
+    const inputsSheet = context.workbook.worksheets.getItemOrNullObject(INPUTS_SHEET);
+    inputsSheet.load("isNullObject");
+    await context.sync();
+    if (inputsSheet.isNullObject) throw new Error(`"${INPUTS_SHEET}" sheet not found.`);
+
+    const used = inputsSheet.getUsedRangeOrNullObject();
+    used.load(["isNullObject", "values", "columnIndex"]);
+    await context.sync();
+    if (used.isNullObject) return [];
+
+    // Offset in case the used range doesn't start in column A.
+    const off = used.columnIndex;
+    const cell = (row, col) => ((row[col - off] === undefined ? "" : row[col - off]) || "").toString().trim();
+
+    const rows = [];
+    for (const row of used.values) {
+      const type = cell(row, INPUTS_TYPE_COL);
+      const label = cell(row, 1);
+      if (!label || BUTTON_TYPES.indexOf(type.toLowerCase()) === -1) continue;
+      rows.push([
+        cell(row, 0),
+        label,
+        type,
+        cell(row, INPUTS_GROUP_COL),
+        cell(row, INPUTS_COLOUR_COL),
+        cell(row, INPUTS_HOME_COL),
+      ]);
+    }
+    return rows;
+  });
+}
+
+/**
+ * Writes a row built from dialog buttons. The fields are already full labels
+ * (callsign, department, location, details), so no dictionary lookup.
+ */
+async function handleButtonEntry(fields) {
+  try {
+    return await Excel.run(async (context) => {
+      const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
+      logSheet.load("isNullObject");
+      await context.sync();
+      if (logSheet.isNullObject) return `Error: "${LOG_SHEET}" sheet not found.`;
+
+      const values = [0, 1, 2, 3].map((i) => (fields[i] || "").toString().trim());
+      if (values.every((v) => v === "")) return "Nothing to log.";
+
+      const nextRow = await findNextLogRow(context, logSheet);
+      const timeString = new Date().toLocaleTimeString("en-AU", {
+        hour12: false,
+        timeZone: "Australia/Perth",
+      });
+
+      logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [[timeString, values[0], values[1], values[2], values[3]]];
+      await context.sync();
+
+      return `Row ${nextRow}: ${values.filter((v) => v !== "").join(" | ")}`;
+    });
+  } catch (err) {
+    console.error(err);
+    return "Error: " + (err.message || err);
+  }
+}
+
 // Required for ExecuteFunction ribbon commands (enforced since Oct 2022,
 // strictly so under the shared runtime) - without this, Office can't find
 // openLogger by name alone and the button click does nothing.
 Office.actions.associate("openLogger", openLogger);
+Office.actions.associate("resetMilestoneLog", resetMilestoneLog);
+// Ready for a "Sync milestones" ribbon button if you add one to the manifest.
+Office.actions.associate("syncMilestones", syncMilestones);
 
 /**
  * Parses a space-delimited shorthand line ("l1s ps ed14 ws"), resolves each
@@ -413,6 +637,7 @@ async function handleLogEntry(rawText) {
       for (const row of inputsRange.values || []) {
         const shorthand = (row[0] || "").toString().trim().toUpperCase();
         const expansion = (row[1] || "").toString().trim();
+        if (shorthand === "CODE") continue; // column-header row
         if (shorthand !== "") dictionary[shorthand] = expansion;
       }
 
