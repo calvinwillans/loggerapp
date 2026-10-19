@@ -79,6 +79,7 @@ const MILESTONE_MAP = {
   F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
   E50: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
+  E62: { b: "Base", c: "Base", d: "", e: "VIP Doors Open" },
   E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
   E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
   C73: { b: "Base", c: "All Call", d: "", e: "Start of support act" },
