@@ -58,6 +58,12 @@ const DAY_ROLLOVER_HOUR = 6;
 const MILESTONE_SHEET = "Event Checks";
 const STATE_SHEET = "_LoggerState";
 
+// Which milestones have been logged, and what their cells held when the
+// Reset button was last pressed. Kept in the workbook's add-in settings
+// rather than on a sheet, so there's nothing to hide, nothing to protect
+// against, and nothing for anyone to delete by accident.
+const MILESTONE_STATE_KEY = "VenueLogger.milestoneState";
+
 // Cell on "Event Checks" -> the row to append to Log once that cell is
 // populated. Add more entries here in the same shape as they come up -
 // leave any column "" to leave it blank on the logged row.
@@ -432,6 +438,54 @@ async function sweepMilestones() {
  * reset - which also means it works in a workbook with protected structure.
  */
 /**
+ * Reads the milestone state: { logged, baseline }.
+ *   logged   - addresses already written to the Log since the last reset
+ *   baseline - what each cell held at the moment of that reset, so a cell
+ *              that is simply still sitting there doesn't log all over again
+ * "available: false" means the settings API wouldn't answer, in which case
+ * the sweep falls back to matching against the Log's own contents.
+ */
+async function loadMilestoneState(context) {
+  try {
+    const setting = context.workbook.settings.getItemOrNullObject(MILESTONE_STATE_KEY);
+    setting.load("isNullObject, value");
+    await context.sync();
+
+    if (setting.isNullObject) return { logged: {}, baseline: {}, available: true };
+
+    const parsed = JSON.parse(setting.value || "{}");
+    return {
+      logged: parsed.logged || {},
+      baseline: parsed.baseline || {},
+      available: true,
+    };
+  } catch (err) {
+    console.error("Milestone state unavailable, falling back to the Log:", err);
+    return { logged: {}, baseline: {}, available: false };
+  }
+}
+
+async function saveMilestoneState(context, state) {
+  if (!state.available) return;
+  try {
+    context.workbook.settings.add(
+      MILESTONE_STATE_KEY,
+      JSON.stringify({ logged: state.logged, baseline: state.baseline })
+    );
+    await context.sync();
+  } catch (err) {
+    console.error("Could not save milestone state:", err);
+  }
+}
+
+/** What a milestone cell currently holds, as one comparable string. */
+function cellSignature(shown, held) {
+  const a = shown === null || shown === undefined ? "" : shown.toString().trim();
+  const b = held === null || held === undefined ? "" : held.toString().trim();
+  return a !== "" ? a : b;
+}
+
+/**
  * Works out where a milestone row belongs in the Log, given its time.
  *
  * Returns { row, insert }. "insert" means an existing row has a later time,
@@ -510,6 +564,8 @@ async function runMilestoneSweep() {
       if (checksSheet.isNullObject) return { checked: 0, logged: 0, error: `"${MILESTONE_SHEET}" sheet not found.` };
       if (logSheet.isNullObject) return { checked: 0, logged: 0, error: `"${LOG_SHEET}" sheet not found.` };
 
+      const state = await loadMilestoneState(context);
+
       // Read every mapped cell in one round trip.
       const addresses = Object.keys(MILESTONE_MAP);
       const cells = addresses.map((a) => {
@@ -553,8 +609,30 @@ async function runMilestoneSweep() {
         const mapping = MILESTONE_MAP[address];
         const details = (mapping.e || "").trim();
         const key = normaliseDetails(details);
-        if (key === "" || already.has(key)) {
+        if (key === "") return;
+
+        // Already logged since the last reset.
+        if (state.logged[address]) {
           report.push(`${address}: "${seen}" already logged, skipped`);
+          return;
+        }
+
+        // Reset takes a snapshot of every cell. A cell still holding exactly
+        // what it held then hasn't been repopulated, so it stays put; change
+        // it, or clear and re-enter it, and it logs again.
+        const signature = cellSignature(shown, held);
+        const baseline = state.baseline[address];
+        const unchangedSinceReset = baseline !== undefined && baseline === signature;
+        if (unchangedSinceReset) {
+          report.push(`${address}: "${seen}" unchanged since reset, skipped`);
+          return;
+        }
+
+        // No reset has touched this one, so fall back to the Log itself: if
+        // its wording is already there, it was logged before.
+        if (baseline === undefined && already.has(key)) {
+          state.logged[address] = true;
+          report.push(`${address}: "${seen}" already in the Log, skipped`);
           return;
         }
 
@@ -568,6 +646,8 @@ async function runMilestoneSweep() {
 
         toLog.push({ address: address, mapping: mapping, details: details, seconds: seconds, parsed: parsed, seen: seen });
         already.add(key);
+        state.logged[address] = true;
+        delete state.baseline[address]; // it has logged since the reset
       });
 
       // Second pass writes them, each slotted in by its own time.
@@ -585,6 +665,7 @@ async function runMilestoneSweep() {
       }
 
       if (logged > 0) {
+        await saveMilestoneState(context, state);
         await context.sync();
         // The dropdown refresh must never undo a successful log: if Excel
         // refuses the validation change, the rows still stand.
@@ -721,12 +802,59 @@ function isNotApplicable(text) {
 }
 
 /**
- * Ribbon button handler, kept for the existing button. Milestones are now
- * deduped against the Log itself, so there is nothing to reset: to make a
- * milestone log again, clear its Details text from the Log. This also
- * removes the old hidden "_LoggerState" sheet if one is still lying around.
+ * Ribbon button handler: "Reset Milestones".
+ *
+ * Clears the record of which milestones have been logged, so every one of
+ * them can log again. It does NOT touch the Log - nothing already written is
+ * changed or removed - and it does not re-log what is sitting on "Event
+ * Checks" right now: a snapshot is taken of every mapped cell, and a
+ * milestone logs again once its cell is repopulated (cleared and re-entered,
+ * or changed to a different time).
+ *
+ * Also removes the old hidden "_LoggerState" sheet if one is still around
+ * from an earlier version.
  */
 async function resetMilestoneLog(event) {
+  let message;
+  try {
+    message = await Excel.run(async (context) => {
+      const checksSheet = context.workbook.worksheets.getItemOrNullObject(MILESTONE_SHEET);
+      checksSheet.load("isNullObject");
+      await context.sync();
+      if (checksSheet.isNullObject) return `Error: "${MILESTONE_SHEET}" sheet not found.`;
+
+      const addresses = Object.keys(MILESTONE_MAP);
+      const cells = addresses.map((a) => {
+        const r = checksSheet.getRange(a);
+        r.load("text, values");
+        return r;
+      });
+      await context.sync();
+
+      // Snapshot what each cell holds right now; nothing re-logs until one of
+      // them changes.
+      const baseline = {};
+      let filled = 0;
+      addresses.forEach((address, i) => {
+        const signature = cellSignature(cells[i].text[0][0], cells[i].values[0][0]);
+        baseline[address] = signature;
+        if (signature !== "") filled++;
+      });
+
+      const state = { logged: {}, baseline: baseline, available: true };
+      await saveMilestoneState(context, state);
+
+      return (
+        `Milestones reset: all ${addresses.length} can log again. ` +
+        `${filled} cell${filled === 1 ? "" : "s"} already filled in will log when changed or re-entered.`
+      );
+    });
+  } catch (err) {
+    console.error("resetMilestoneLog failed:", err);
+    message = "Reset failed: " + (err.message || err);
+  }
+
+  // Tidy up the hidden sheet an older build used for this.
   try {
     await Excel.run(async (context) => {
       const stateSheet = context.workbook.worksheets.getItemOrNullObject(STATE_SHEET);
@@ -738,12 +866,12 @@ async function resetMilestoneLog(event) {
       }
     });
   } catch (err) {
-    // Deleting can fail if the workbook structure is protected. Harmless now.
-    console.error("resetMilestoneLog:", err);
+    // Deleting can fail on a workbook with protected structure. Harmless.
+    console.error("resetMilestoneLog (old state sheet):", err);
   }
-  const result = await sweepMilestones();
-  console.log("Reset: " + sweepSummary(result));
-  sendToDialog({ kind: "status", ok: !result.error, text: sweepSummary(result) });
+
+  console.log(message);
+  sendToDialog({ kind: "status", ok: !/^(error|reset failed)/i.test(message), text: message });
   if (event) event.completed();
 }
 
