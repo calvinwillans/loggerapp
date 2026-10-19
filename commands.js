@@ -55,6 +55,13 @@ const ALL_ACTIONS_HEADER = "All Actions";
 // 6am suits a venue whose events start in the afternoon or evening.
 const DAY_ROLLOVER_HOUR = 6;
 
+// A milestone earlier than EVERY entry already in the Log is almost always a
+// different day's event (last event's rows still sitting there, or a test
+// entry), not something that belongs above the first line of today's log.
+// With this false it is added at the bottom instead of the very top. Set it
+// true if you routinely backfill times from before the Log's first entry.
+const PLACE_BEFORE_FIRST_ENTRY = false;
+
 const MILESTONE_SHEET = "Event Checks";
 const STATE_SHEET = "_LoggerState";
 
@@ -70,7 +77,7 @@ const MILESTONE_STATE_KEY = "VenueLogger.milestoneState";
 const MILESTONE_MAP = {
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
   F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
-  F14: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
+  E50: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
   E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
   E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
@@ -80,13 +87,13 @@ const MILESTONE_MAP = {
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
   C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  C105: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
-  C106: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
-  C107: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
-  C108: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
-  C109: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
-  C110: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
-  C116: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
+  C104: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
+  C105: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
+  C106: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
+  C107: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C108: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
+  C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C115: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
@@ -501,6 +508,10 @@ async function planMilestonePlacement(context, logSheet, seconds) {
   const texts = range.text;
   const key = timeSortKey(seconds);
 
+  let firstFilledRow = 0;
+  let blankRow = LOG_MAX_ROW + 1;
+  let candidate = null; // the first row with a later time
+
   for (let i = 0; i < values.length; i++) {
     const rowNumber = LOG_FIRST_DATA_ROW + i;
     const held = values[i][0];
@@ -509,17 +520,42 @@ async function planMilestonePlacement(context, logSheet, seconds) {
       (held === null || held === undefined || held.toString().trim() === "") &&
       (shown === null || shown === undefined || shown.toString().trim() === "");
 
-    if (blank) return { row: rowNumber, insert: false }; // reached the bottom
+    if (blank) { blankRow = rowNumber; break; } // reached the bottom
+    if (firstFilledRow === 0) firstFilledRow = rowNumber;
+
+    if (candidate !== null) continue; // already know where it goes, just need the bottom
 
     // Prefer the stored value, fall back to what's displayed.
     let existing = parseTimeToSeconds(held);
     if (existing === null) existing = parseTimeToSeconds(shown);
     if (existing === null) continue; // not a time - leave that row alone
 
-    if (timeSortKey(existing) > key) return { row: rowNumber, insert: true };
+    if (timeSortKey(existing) > key) {
+      candidate = { row: rowNumber, existingShown: (shown || held || "").toString().trim() };
+    }
   }
 
-  return { row: LOG_MAX_ROW + 1, insert: false };
+  // Nothing later anywhere: it belongs at the bottom.
+  if (candidate === null) {
+    return { row: blankRow, insert: false, reason: "added at the bottom" };
+  }
+
+  // Earlier than every entry in the Log. Unless that's wanted, the Log is
+  // from another day (or this is a test entry), so put it at the bottom
+  // rather than pushing it in above the first line.
+  if (candidate.row === firstFilledRow && !PLACE_BEFORE_FIRST_ENTRY) {
+    return {
+      row: blankRow,
+      insert: false,
+      reason: `earlier than every entry in the Log (first is ${candidate.existingShown}), added at the bottom`,
+    };
+  }
+
+  return {
+    row: candidate.row,
+    insert: true,
+    reason: `inserted above ${candidate.existingShown} in row ${candidate.row}`,
+  };
 }
 
 /**
@@ -528,7 +564,7 @@ async function planMilestonePlacement(context, logSheet, seconds) {
  */
 async function writeMilestoneRow(context, logSheet, mapping, seconds) {
   const plan = await planMilestonePlacement(context, logSheet, seconds);
-  if (plan.row > LOG_MAX_ROW) return 0;
+  if (plan.row > LOG_MAX_ROW) return { row: 0, reason: "the Log is full" };
 
   let row = plan.row;
   if (plan.insert) {
@@ -541,7 +577,8 @@ async function writeMilestoneRow(context, logSheet, mapping, seconds) {
       console.error("Could not insert a row for a backfilled milestone:", err);
       const fallback = await planMilestonePlacement(context, logSheet, 24 * 3600 - 1);
       row = fallback.row;
-      if (row > LOG_MAX_ROW) return 0;
+      if (row > LOG_MAX_ROW) return { row: 0, reason: "the Log is full" };
+      plan.reason = "could not insert a row, added at the bottom instead";
     }
   }
 
@@ -549,7 +586,7 @@ async function writeMilestoneRow(context, logSheet, mapping, seconds) {
     [secondsToClock(seconds), mapping.b || "", mapping.c || "", mapping.d || "", (mapping.e || "").trim()],
   ];
   await context.sync();
-  return row;
+  return { row: row, reason: plan.reason };
 }
 
 async function runMilestoneSweep() {
@@ -652,14 +689,15 @@ async function runMilestoneSweep() {
 
       // Second pass writes them, each slotted in by its own time.
       for (const entry of toLog) {
-        const row = await writeMilestoneRow(context, logSheet, entry.mapping, entry.seconds);
-        if (row === 0) {
-          report.push(`${entry.address}: Log is full`);
+        const placed = await writeMilestoneRow(context, logSheet, entry.mapping, entry.seconds);
+        if (placed.row === 0) {
+          report.push(`${entry.address}: ${placed.reason}`);
           continue;
         }
         report.push(
-          `${entry.address}: "${entry.seen}" -> row ${row} at ${secondsToClock(entry.seconds)}` +
-            (entry.parsed ? "" : " (no time found in the cell, used the clock)")
+          `${entry.address}: "${entry.seen}" -> row ${placed.row} at ${secondsToClock(entry.seconds)}` +
+            (entry.parsed ? "" : " (no time found in the cell, used the clock)") +
+            ` - ${placed.reason}`
         );
         logged++;
       }
