@@ -50,6 +50,11 @@ const ACTION_COLUMN = "F";
 const SECONDARY_ACTION_COLUMN = "G";
 const ALL_ACTIONS_HEADER = "All Actions";
 
+// An event runs past midnight, so a time earlier than this counts as "after
+// midnight" and sorts to the end of the Log rather than the beginning.
+// 6am suits a venue whose events start in the afternoon or evening.
+const DAY_ROLLOVER_HOUR = 6;
+
 const MILESTONE_SHEET = "Event Checks";
 const STATE_SHEET = "_LoggerState";
 
@@ -426,6 +431,73 @@ async function sweepMilestones() {
  * the Log (column E), so there is no hidden state sheet to create, lose, or
  * reset - which also means it works in a workbook with protected structure.
  */
+/**
+ * Works out where a milestone row belongs in the Log, given its time.
+ *
+ * Returns { row, insert }. "insert" means an existing row has a later time,
+ * so a blank row has to be pushed in at that position; otherwise the row is
+ * simply the first empty one at the bottom.
+ */
+async function planMilestonePlacement(context, logSheet, seconds) {
+  const range = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
+  range.load("values, text");
+  await context.sync();
+
+  const values = range.values;
+  const texts = range.text;
+  const key = timeSortKey(seconds);
+
+  for (let i = 0; i < values.length; i++) {
+    const rowNumber = LOG_FIRST_DATA_ROW + i;
+    const held = values[i][0];
+    const shown = texts[i][0];
+    const blank =
+      (held === null || held === undefined || held.toString().trim() === "") &&
+      (shown === null || shown === undefined || shown.toString().trim() === "");
+
+    if (blank) return { row: rowNumber, insert: false }; // reached the bottom
+
+    // Prefer the stored value, fall back to what's displayed.
+    let existing = parseTimeToSeconds(held);
+    if (existing === null) existing = parseTimeToSeconds(shown);
+    if (existing === null) continue; // not a time - leave that row alone
+
+    if (timeSortKey(existing) > key) return { row: rowNumber, insert: true };
+  }
+
+  return { row: LOG_MAX_ROW + 1, insert: false };
+}
+
+/**
+ * Puts one milestone row into the Log at the right place. Returns the row it
+ * landed on, or 0 if the Log is full.
+ */
+async function writeMilestoneRow(context, logSheet, mapping, seconds) {
+  const plan = await planMilestonePlacement(context, logSheet, seconds);
+  if (plan.row > LOG_MAX_ROW) return 0;
+
+  let row = plan.row;
+  if (plan.insert) {
+    try {
+      logSheet.getRange(`${row}:${row}`).insert(Excel.InsertShiftDirection.down);
+      await context.sync();
+    } catch (err) {
+      // Inserting can be refused (a protected sheet, say). Rather than lose
+      // the entry, fall back to adding it at the bottom, out of order.
+      console.error("Could not insert a row for a backfilled milestone:", err);
+      const fallback = await planMilestonePlacement(context, logSheet, 24 * 3600 - 1);
+      row = fallback.row;
+      if (row > LOG_MAX_ROW) return 0;
+    }
+  }
+
+  logSheet.getRange(`A${row}:E${row}`).values = [
+    [secondsToClock(seconds), mapping.b || "", mapping.c || "", mapping.d || "", (mapping.e || "").trim()],
+  ];
+  await context.sync();
+  return row;
+}
+
 async function runMilestoneSweep() {
   try {
     return await Excel.run(async (context) => {
@@ -453,8 +525,6 @@ async function runMilestoneSweep() {
       // the longer milestones logged again on every sweep.
       const detailsRange = logSheet.getRange(`E${LOG_FIRST_DATA_ROW}:E${LOG_MAX_ROW}`);
       detailsRange.load("values");
-      const timeRange = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
-      timeRange.load("values");
       await context.sync();
 
       const already = new Set();
@@ -463,20 +533,11 @@ async function runMilestoneSweep() {
         if (text !== "") already.add(text);
       }
 
-      let nextRow = LOG_MAX_ROW + 1;
-      const timeValues = timeRange.values;
-      for (let i = 0; i < timeValues.length; i++) {
-        const cell = timeValues[i][0];
-        if (cell === null || cell === undefined || cell.toString().trim() === "") {
-          nextRow = LOG_FIRST_DATA_ROW + i;
-          break;
-        }
-      }
-
-      const timeString = new Date().toLocaleTimeString("en-AU", { hour12: false, timeZone: "Australia/Perth" });
       let logged = 0;
       const report = [];
 
+      // First pass decides what needs logging, reading only.
+      const toLog = [];
       addresses.forEach((address, i) => {
         // A cell counts as filled if either what it shows or what it holds is
         // non-blank, so a time entered any which way is recognised.
@@ -497,19 +558,31 @@ async function runMilestoneSweep() {
           return;
         }
 
-        if (nextRow > LOG_MAX_ROW) {
-          report.push(`${address}: Log is full`);
-          return;
-        }
+        // The time comes from the cell itself, not the clock, so a milestone
+        // backfilled an hour later still carries the time it happened. The
+        // stored value is tried first, then what the cell displays.
+        let seconds = parseTimeToSeconds(cells[i].values[0][0]);
+        if (seconds === null) seconds = parseTimeToSeconds(shown);
+        const parsed = seconds !== null;
+        if (!parsed) seconds = nowSeconds();
 
-        logSheet.getRange(`A${nextRow}:E${nextRow}`).values = [
-          [timeString, mapping.b || "", mapping.c || "", mapping.d || "", details],
-        ];
-        report.push(`${address}: "${seen}" -> logged to row ${nextRow}`);
+        toLog.push({ address: address, mapping: mapping, details: details, seconds: seconds, parsed: parsed, seen: seen });
         already.add(key);
-        nextRow++;
-        logged++;
       });
+
+      // Second pass writes them, each slotted in by its own time.
+      for (const entry of toLog) {
+        const row = await writeMilestoneRow(context, logSheet, entry.mapping, entry.seconds);
+        if (row === 0) {
+          report.push(`${entry.address}: Log is full`);
+          continue;
+        }
+        report.push(
+          `${entry.address}: "${entry.seen}" -> row ${row} at ${secondsToClock(entry.seconds)}` +
+            (entry.parsed ? "" : " (no time found in the cell, used the clock)")
+        );
+        logged++;
+      }
 
       if (logged > 0) {
         await context.sync();
@@ -565,6 +638,82 @@ function a1ToRowCol(address) {
   let col = 0;
   for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
   return { row, col: col - 1 };
+}
+
+/**
+ * Reads a time out of a milestone cell and returns seconds since midnight,
+ * or null if there is no time to be had.
+ *
+ * Handles what people actually type, plus what Excel stores underneath:
+ *   a real time value (0.8125, i.e. a fraction of a day, or a date serial)
+ *   "19:30"  "19:30:45"  "7.30pm"  "7:30 PM"  "1930"
+ */
+function parseTimeToSeconds(raw) {
+  if (raw === null || raw === undefined) return null;
+
+  // A real Excel time is a number: whole part = date, fraction = time of day.
+  if (typeof raw === "number" && isFinite(raw)) {
+    const fraction = raw - Math.floor(raw);
+    if (fraction > 0) return Math.round(fraction * 86400);
+    // A whole number isn't a time value, but people do type 1930 into a cell
+    // and Excel stores that as the number 1930.
+    if (raw >= 1 && raw <= 2359) {
+      const hours = Math.floor(raw / 100);
+      const minutes = raw % 100;
+      if (hours <= 23 && minutes <= 59) return hours * 3600 + minutes * 60;
+    }
+    return null;
+  }
+
+  const text = raw.toString().trim();
+  if (text === "") return null;
+
+  // 19:30, 19:30:45, 7.30 pm
+  let m = text.match(/^(\d{1,2})[:.](\d{1,2})(?:[:.](\d{1,2}))?\s*(am|pm|a\.m\.|p\.m\.)?$/i);
+  if (!m) {
+    // 1930 / 0730, four digits with no separator
+    const military = text.match(/^(\d{2})(\d{2})$/);
+    if (military) m = [text, military[1], military[2], undefined, undefined];
+  }
+  if (!m) return null;
+
+  let hours = parseInt(m[1], 10);
+  const minutes = parseInt(m[2], 10);
+  const seconds = m[3] ? parseInt(m[3], 10) : 0;
+  const meridiem = (m[4] || "").toLowerCase().replace(/\./g, "");
+
+  if (minutes > 59 || seconds > 59) return null;
+  if (meridiem === "pm" && hours < 12) hours += 12;
+  if (meridiem === "am" && hours === 12) hours = 0;
+  if (hours > 23) return null;
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+/** Seconds since midnight -> "HH:mm:ss", matching the rest of the Log. */
+function secondsToClock(totalSeconds) {
+  const s = ((Math.round(totalSeconds) % 86400) + 86400) % 86400;
+  const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor((s % 3600) / 60)) + ":" + pad(s % 60);
+}
+
+/**
+ * Ordering key for a time of day. Anything before DAY_ROLLOVER_HOUR is
+ * treated as the small hours of the following morning, so 00:30 sorts after
+ * 23:50 instead of jumping to the top of an event that started at 17:00.
+ */
+function timeSortKey(seconds) {
+  return seconds < DAY_ROLLOVER_HOUR * 3600 ? seconds + 86400 : seconds;
+}
+
+/** The time right now, as seconds since midnight in venue local time. */
+function nowSeconds() {
+  const parts = new Date().toLocaleTimeString("en-AU", {
+    hour12: false,
+    timeZone: "Australia/Perth",
+  });
+  const parsed = parseTimeToSeconds(parts);
+  return parsed === null ? 0 : parsed;
 }
 
 function isNotApplicable(text) {
