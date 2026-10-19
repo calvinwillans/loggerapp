@@ -70,7 +70,7 @@ const MILESTONE_STATE_KEY = "VenueLogger.milestoneState";
 const MILESTONE_MAP = {
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
   F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
-  E50: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
+  F14: { b: "Base", c: "", d: "", e: "WAPOL arrived onsite" },
   E52: { b: "Base", c: "All Call", d: "", e: "RAC Local Lounge now open" },
   E63: { b: "Base", c: "All Call", d: "", e: "External doors now open" },
   E65: { b: "Base", c: "All Call", d: "", e: "Internal doors now open" },
@@ -80,13 +80,13 @@ const MILESTONE_MAP = {
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
   C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  C104: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
-  C105: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
-  C106: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
-  C107: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
-  C108: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
-  C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
-  C115: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
+  C105: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
+  C106: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
+  C107: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
+  C108: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C109: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
+  C110: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C116: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
