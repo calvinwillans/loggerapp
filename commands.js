@@ -105,7 +105,7 @@ const MILESTONE_MAP = {
   C107: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
   C108: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
   C109: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
-  C1010: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C110: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
   C111: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
   C112: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
   // Row 119 = "Handover of Channel 1 back to CRO and Base sign off", the last
