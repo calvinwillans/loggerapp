@@ -8,8 +8,13 @@
  *
  * Messages to commands.js (JSON strings):
  *   { kind: "ready" }                      - send me the buttons
- *   { kind: "text",  text: "l1s ps ed14" } - old shorthand line
- *   { kind: "entry", fields: [callsign, department, location, details] }
+ *   { kind: "text",  text: "l1s ps ed14", startedAt } - old shorthand line
+ *   { kind: "entry", fields: [callsign, department, location, details], startedAt }
+ *
+ * startedAt ("HH:mm:ss", Perth time) is when the operator began the entry -
+ * the first button press or the first character typed - so an entry that
+ * takes a minute to build still carries the time it actually started, and
+ * commands.js slots it into the Log at that time.
  * Messages from commands.js:
  *   { kind: "menuChunk", id, i, n, data }  - button data, split into chunks
  *   { kind: "status", ok, text }           - result of a log write
@@ -49,6 +54,11 @@ let paths = { callsign: [], location: [] };
 let autoLocation = false; // true when Location was filled in from the callsign
 let busy = false;
 let busyTimer = null;
+// True from sending an entry until Excel answers it - even past the timeout,
+// so a late reply still clears the finished entry. Status messages that
+// aren't a reply (Reset Milestones, a milestone sync) leave the entry alone.
+let awaitingReply = false;
+let startedAt = null;  // "HH:mm:ss" when the current entry was begun
 let pendingRecent = null;
 let menuLoaded = false;
 const chunkBuffer = {};
@@ -66,6 +76,12 @@ function start(t) {
   $("logInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); logEntry(); }
     if (e.key === "Escape") { e.preventDefault(); clearAll(); }
+  });
+  // First character typed starts the entry's clock. Deleting everything,
+  // with no buttons picked or skipped, abandons it.
+  $("logInput").addEventListener("input", () => {
+    if ($("logInput").value.trim() !== "") markStart();
+    else if (!entryHasButtons()) startedAt = null;
   });
   $("logBtn").addEventListener("click", logEntry);
   $("clearBtn").addEventListener("click", clearAll);
@@ -124,9 +140,15 @@ function onParentMessage(raw) {
   }
 
   if (msg.kind === "status") {
+    setStatus(msg.text, msg.ok ? "ok" : "err");
+
+    // Not a reply to an entry (Reset Milestones, a milestone sync): show it,
+    // but leave whatever the operator is building exactly as it is.
+    if (!awaitingReply) return;
+
+    awaitingReply = false;
     clearTimeout(busyTimer);
     busy = false;
-    setStatus(msg.text, msg.ok ? "ok" : "err");
     $("logInput").disabled = false;
     $("logBtn").disabled = false;
     if (msg.ok) {
@@ -134,6 +156,7 @@ function onParentMessage(raw) {
       pendingRecent = null;
       resetEntry();
     }
+    // On an error the entry and its start time stay put, ready to resend.
     $("logInput").focus();
   }
 }
@@ -304,6 +327,7 @@ function applicable(key) {
 }
 
 function pick(key, item) {
+  markStart();
   sel[key] = item;
   skipped[key] = false;
   if (key === "department" && sel.incident && incidentsFor(item).indexOf(sel.incident) === -1) {
@@ -335,6 +359,7 @@ function applyHome(callsign) {
 
 function skipStage() {
   if (stage === "done") return;
+  markStart();
   sel[stage] = null;
   skipped[stage] = true;
   if (stage === "location") {
@@ -371,6 +396,7 @@ function goToStage(key) {
 }
 
 function resetEntry() {
+  startedAt = null; // the next press or keystroke starts the next entry's clock
   sel = emptySelection();
   skipped = {};
   paths = { callsign: [], location: [] };
@@ -399,7 +425,7 @@ function logEntry() {
   if (!anyPicked) {
     if (notes === "") { setStatus("Pick some buttons or type shorthand first.", "err"); return; }
     pendingRecent = null;
-    send({ kind: "text", text: notes });
+    send({ kind: "text", text: notes, startedAt: startedAt || perthClock() });
     return;
   }
 
@@ -411,11 +437,12 @@ function logEntry() {
     details,
   ];
   pendingRecent = { callsign: sel.callsign, department: sel.department, incident: sel.incident, location: sel.location };
-  send({ kind: "entry", fields });
+  send({ kind: "entry", fields, startedAt: startedAt || perthClock() });
 }
 
 function send(obj) {
   busy = true;
+  awaitingReply = true;
   $("logInput").disabled = true;
   $("logBtn").disabled = true;
   setStatus("Logging…", "busy");
@@ -454,6 +481,7 @@ function recentText(r) {
 
 function useRecent(r) {
   if (busy) return;
+  markStart();
   sel = emptySelection();
   skipped = {};
   autoLocation = false;
@@ -585,7 +613,7 @@ function renderStage() {
     const key = stage;
     const t = tile(f.name, "", f.colour, () => {
       if (only) pick(key, only);
-      else { paths[key].push(f.name); render(); }
+      else { markStart(); paths[key].push(f.name); render(); }
     });
     t.classList.add("folder");
     const count = document.createElement("span");
@@ -695,6 +723,43 @@ function inkFor(hex) {
   });
   const lum = 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
   return lum > 0.22 ? "#0f172a" : "#ffffff";
+}
+
+/* ==========================================================================
+ * Entry start time
+ * ========================================================================*/
+
+/** Starts the clock for the current entry, if it isn't already running. */
+function markStart() {
+  if (startedAt === null) startedAt = perthClock();
+}
+
+/** True if any slot has been picked or skipped for the current entry. */
+function entryHasButtons() {
+  return STAGES.some((s) => sel[s.key] || skipped[s.key]);
+}
+
+/**
+ * Perth wall-clock time as "HH:mm:ss". Built from the clock parts because
+ * some browsers write the first hour after midnight as "24:15:00".
+ */
+function perthClock() {
+  const parts = {};
+  new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Perth",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hourCycle: "h23",
+  })
+    .formatToParts(new Date())
+    .forEach((p) => { parts[p.type] = p.value; });
+  const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  return (
+    pad(parseInt(parts.hour, 10) % 24) + ":" +
+    pad(parseInt(parts.minute, 10)) + ":" +
+    pad(parseInt(parts.second, 10))
+  );
 }
 
 function setStatus(message, kind) {
