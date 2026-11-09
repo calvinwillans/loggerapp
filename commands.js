@@ -38,6 +38,12 @@ const LOG_SHEET = "Log";
 const LOG_FIRST_DATA_ROW = 8; // first entry always lands here, matching the template
 const LOG_MAX_ROW = 5000; // generous ceiling when scanning for the next empty row
 
+// Last column of the log table itself (Time .. Secondary Action). When a
+// backfilled milestone needs a row pushed in, only A:G shifts down - the
+// Live Counts panel to the right (I2:K15) stays where it is. Inserting a
+// whole sheet row used to split that panel in half.
+const LOG_LAST_COLUMN = "G";
+
 const ACTIONS_SHEET = "Actions";
 const DEPARTMENT_COLUMN = "C";
 const ACTION_COLUMN = "F";
@@ -55,6 +61,20 @@ const ALL_ACTIONS_HEADER = "All Actions";
 // 6am suits a venue whose events start in the afternoon or evening.
 const DAY_ROLLOVER_HOUR = 6;
 
+// A milestone earlier than EVERY entry already in the Log is almost always a
+// different day's event (last event's rows still sitting there, or a test
+// entry), not something that belongs above the first line of today's log.
+// With this false it is added at the bottom instead of the very top. Set it
+// true if you routinely backfill times from before the Log's first entry.
+const PLACE_BEFORE_FIRST_ENTRY = false;
+
+// What to do when a milestone cell has something in it that isn't a time
+// (a word, a header, a stray note). false = skip it and say so in the sweep
+// report. true = log it anyway, stamped with the current clock time.
+// This was effectively true before, which is how the "Time Confirmed"
+// header in C104 got logged as a whitelevel check on every fresh copy.
+const LOG_NON_TIME_WITH_CLOCK = false;
+
 const MILESTONE_SHEET = "Event Checks";
 const STATE_SHEET = "_LoggerState";
 
@@ -62,11 +82,22 @@ const STATE_SHEET = "_LoggerState";
 // Reset button was last pressed. Kept in the workbook's add-in settings
 // rather than on a sheet, so there's nothing to hide, nothing to protect
 // against, and nothing for anyone to delete by accident.
+//
+// Add-in settings are saved INSIDE the .xlsx, so they travel with every copy
+// of the file. To stop one event's record leaking into the next, the state is
+// stamped with the event's date and name (below) and thrown away when they no
+// longer match - see loadMilestoneState.
 const MILESTONE_STATE_KEY = "VenueLogger.milestoneState";
+const EVENT_SHEET = "Event Manager";
+const EVENT_STAMP_CELLS = ["B3", "B4"]; // Date/Day, Event Name
 
 // Cell on "Event Checks" -> the row to append to Log once that cell is
 // populated. Add more entries here in the same shape as they come up -
 // leave any column "" to leave it blank on the logged row.
+//
+// Every address here must be the time cell on that check's own row. Row 104
+// is the "White Level Checks" section header, so the whitelevel entries start
+// at row 105, and Venue Clear is row 110.
 const MILESTONE_MAP = {
   F23: { b: "Base", c: "All Call", d: "", e: "All departments switch over to event channels" },
   F25: { b: "Base", c: "", d: "", e: "Fire panel in event mode. EWIS switched to manual" },
@@ -80,13 +111,16 @@ const MILESTONE_MAP = {
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
   C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  C104: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
-  C105: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
-  C106: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
-  C107: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
-  C108: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
-  C109: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
-  C115: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
+  C105: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
+  C106: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
+  C107: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
+  C108: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C109: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
+  C110: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  // Row 119 = "Handover of Channel 1 back to CRO and Base sign off", the last
+  // step of the night. (Row 115 is "External Checks Started", which is why
+  // this used to log as soon as external checks began.)
+  C119: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
@@ -111,17 +145,11 @@ Office.onReady(async (info) => {
     await registerMilestoneWatcher();
     const opening = await sweepMilestones();
     console.log("On open: " + sweepSummary(opening));
+    for (const line of opening.report || []) console.log("  " + line);
     await refreshSecondaryOnOpen();
   }
 });
 
-/**
- * Registers a listener on the Log sheet: any edit to column C (Department)
- * refreshes that row's Action Taken (F) dropdown to match the corresponding
- * column on the Actions sheet. Fully open-ended - add a new column to
- * Actions with any header text and it's usable immediately, no other
- * changes needed.
- */
 /** Puts the column G dropdown on rows already in the Log when the file opens. */
 async function refreshSecondaryOnOpen() {
   try {
@@ -137,6 +165,13 @@ async function refreshSecondaryOnOpen() {
   }
 }
 
+/**
+ * Registers a listener on the Log sheet: any edit to column C (Department)
+ * refreshes that row's Action Taken (F) dropdown to match the corresponding
+ * column on the Actions sheet. Fully open-ended - add a new column to
+ * Actions with any header text and it's usable immediately, no other
+ * changes needed.
+ */
 async function registerDepartmentWatcher() {
   await Excel.run(async (context) => {
     const logSheet = context.workbook.worksheets.getItemOrNullObject(LOG_SHEET);
@@ -384,7 +419,7 @@ async function onMilestoneSheetChanged() {
  */
 function normaliseDetails(value) {
   return (value === null || value === undefined ? "" : value.toString())
-    .replace(/\u00a0/g, " ")
+    .replace(/ /g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -420,48 +455,99 @@ async function sweepMilestones() {
       checked: second.checked,
       logged: result.logged + second.logged,
       error: result.error || second.error,
-      report: second.report,
+      report: (result.report || []).concat(second.report || []),
     };
   }
   return result;
 }
 
 /**
- * Checks EVERY cell in MILESTONE_MAP and logs any that are filled in but not
- * yet in the Log. Deliberately independent of the change event: it also runs
- * on workbook open, from the ribbon, and after each dialog entry, so a
- * milestone filled by formula, pasted in, or entered while the add-in was
- * asleep still gets picked up.
- *
- * Duplicates are prevented by matching against the Details text already in
- * the Log (column E), so there is no hidden state sheet to create, lose, or
- * reset - which also means it works in a workbook with protected structure.
+ * The event this workbook is for, as one string: "date|event name" from the
+ * Event Manager sheet. Used to tell whether saved milestone state belongs to
+ * this event or came along with a copied file.
  */
+async function readEventStamp(context) {
+  try {
+    const sheet = context.workbook.worksheets.getItemOrNullObject(EVENT_SHEET);
+    sheet.load("isNullObject");
+    await context.sync();
+    if (sheet.isNullObject) return "";
+
+    const cells = EVENT_STAMP_CELLS.map((a) => {
+      const r = sheet.getRange(a);
+      r.load("values");
+      return r;
+    });
+    await context.sync();
+
+    return cells
+      .map((r) => {
+        const v = r.values[0][0];
+        return v === null || v === undefined ? "" : v.toString().trim();
+      })
+      .join("|");
+  } catch (err) {
+    console.error("Could not read the event stamp:", err);
+    return "";
+  }
+}
+
 /**
- * Reads the milestone state: { logged, baseline }.
+ * Reads the milestone state: { logged, baseline, event }.
  *   logged   - addresses already written to the Log since the last reset
  *   baseline - what each cell held at the moment of that reset, so a cell
  *              that is simply still sitting there doesn't log all over again
+ *   event    - the event stamp the state was saved under
  * "available: false" means the settings API wouldn't answer, in which case
  * the sweep falls back to matching against the Log's own contents.
+ *
+ * Saved state is ignored (and the Log's own contents used instead) when:
+ *   - it was saved for a different event (date or name on Event Manager
+ *     differs), i.e. the file is a copy of an earlier event's workbook or of
+ *     a template that was tested with; or
+ *   - the Log has no entries at all - nothing can have been logged into an
+ *     empty Log, so any "already logged" flags must have come from elsewhere.
+ * If the Event Manager details are filled in partway through an event, the
+ * state resets, but nothing double-logs: anything already in the Log is
+ * still recognised by its wording.
  */
-async function loadMilestoneState(context) {
+async function loadMilestoneState(context, logHasEntries) {
+  const event = await readEventStamp(context);
   try {
     const setting = context.workbook.settings.getItemOrNullObject(MILESTONE_STATE_KEY);
     setting.load("isNullObject, value");
     await context.sync();
 
-    if (setting.isNullObject) return { logged: {}, baseline: {}, available: true };
+    const fresh = { logged: {}, baseline: {}, event: event, available: true };
+    if (setting.isNullObject) return fresh;
 
-    const parsed = JSON.parse(setting.value || "{}");
-    return {
+    let parsed = JSON.parse(setting.value || "{}");
+    // In case the value ever comes back double-encoded (Office stores
+    // settings as JSON inside the file), unwrap it once more.
+    if (typeof parsed === "string") parsed = JSON.parse(parsed || "{}");
+
+    if (parsed.event === undefined || parsed.event !== event) {
+      console.log(
+        `Saved milestone state ignored: it was saved for "${parsed.event === undefined ? "(unknown event)" : parsed.event}", ` +
+          `this workbook is "${event}". Matching against the Log instead.`
+      );
+      return fresh;
+    }
+
+    const state = {
       logged: parsed.logged || {},
       baseline: parsed.baseline || {},
+      event: event,
       available: true,
     };
+    if (!logHasEntries && Object.keys(state.logged).length > 0) {
+      console.log("Log is empty, so saved 'already logged' flags were ignored.");
+      state.logged = {};
+    }
+    return state;
   } catch (err) {
     console.error("Milestone state unavailable, falling back to the Log:", err);
-    return { logged: {}, baseline: {}, available: false };
+    return { logged: {}, baseline: {}, event: event, available: false };
   }
 }
 
@@ -470,7 +556,7 @@ async function saveMilestoneState(context, state) {
   try {
     context.workbook.settings.add(
       MILESTONE_STATE_KEY,
-      JSON.stringify({ logged: state.logged, baseline: state.baseline })
+      JSON.stringify({ logged: state.logged, baseline: state.baseline, event: state.event })
     );
     await context.sync();
   } catch (err) {
@@ -501,6 +587,10 @@ async function planMilestonePlacement(context, logSheet, seconds) {
   const texts = range.text;
   const key = timeSortKey(seconds);
 
+  let firstFilledRow = 0;
+  let blankRow = LOG_MAX_ROW + 1;
+  let candidate = null; // the first row with a later time
+
   for (let i = 0; i < values.length; i++) {
     const rowNumber = LOG_FIRST_DATA_ROW + i;
     const held = values[i][0];
@@ -509,17 +599,42 @@ async function planMilestonePlacement(context, logSheet, seconds) {
       (held === null || held === undefined || held.toString().trim() === "") &&
       (shown === null || shown === undefined || shown.toString().trim() === "");
 
-    if (blank) return { row: rowNumber, insert: false }; // reached the bottom
+    if (blank) { blankRow = rowNumber; break; } // reached the bottom
+    if (firstFilledRow === 0) firstFilledRow = rowNumber;
+
+    if (candidate !== null) continue; // already know where it goes, just need the bottom
 
     // Prefer the stored value, fall back to what's displayed.
     let existing = parseTimeToSeconds(held);
     if (existing === null) existing = parseTimeToSeconds(shown);
     if (existing === null) continue; // not a time - leave that row alone
 
-    if (timeSortKey(existing) > key) return { row: rowNumber, insert: true };
+    if (timeSortKey(existing) > key) {
+      candidate = { row: rowNumber, existingShown: (shown || held || "").toString().trim() };
+    }
   }
 
-  return { row: LOG_MAX_ROW + 1, insert: false };
+  // Nothing later anywhere: it belongs at the bottom.
+  if (candidate === null) {
+    return { row: blankRow, insert: false, reason: "added at the bottom" };
+  }
+
+  // Earlier than every entry in the Log. Unless that's wanted, the Log is
+  // from another day (or this is a test entry), so put it at the bottom
+  // rather than pushing it in above the first line.
+  if (candidate.row === firstFilledRow && !PLACE_BEFORE_FIRST_ENTRY) {
+    return {
+      row: blankRow,
+      insert: false,
+      reason: `earlier than every entry in the Log (first is ${candidate.existingShown}), added at the bottom`,
+    };
+  }
+
+  return {
+    row: candidate.row,
+    insert: true,
+    reason: `inserted above ${candidate.existingShown} in row ${candidate.row}`,
+  };
 }
 
 /**
@@ -528,12 +643,14 @@ async function planMilestonePlacement(context, logSheet, seconds) {
  */
 async function writeMilestoneRow(context, logSheet, mapping, seconds) {
   const plan = await planMilestonePlacement(context, logSheet, seconds);
-  if (plan.row > LOG_MAX_ROW) return 0;
+  if (plan.row > LOG_MAX_ROW) return { row: 0, reason: "the Log is full" };
 
   let row = plan.row;
   if (plan.insert) {
     try {
-      logSheet.getRange(`${row}:${row}`).insert(Excel.InsertShiftDirection.down);
+      // Only the log table's own columns move down, not the whole sheet row,
+      // so the Live Counts panel beside it isn't split apart.
+      logSheet.getRange(`A${row}:${LOG_LAST_COLUMN}${row}`).insert(Excel.InsertShiftDirection.down);
       await context.sync();
     } catch (err) {
       // Inserting can be refused (a protected sheet, say). Rather than lose
@@ -541,7 +658,8 @@ async function writeMilestoneRow(context, logSheet, mapping, seconds) {
       console.error("Could not insert a row for a backfilled milestone:", err);
       const fallback = await planMilestonePlacement(context, logSheet, 24 * 3600 - 1);
       row = fallback.row;
-      if (row > LOG_MAX_ROW) return 0;
+      if (row > LOG_MAX_ROW) return { row: 0, reason: "the Log is full" };
+      plan.reason = "could not insert a row, added at the bottom instead";
     }
   }
 
@@ -549,9 +667,16 @@ async function writeMilestoneRow(context, logSheet, mapping, seconds) {
     [secondsToClock(seconds), mapping.b || "", mapping.c || "", mapping.d || "", (mapping.e || "").trim()],
   ];
   await context.sync();
-  return row;
+  return { row: row, reason: plan.reason };
 }
 
+/**
+ * Checks EVERY cell in MILESTONE_MAP and logs any that are filled in but not
+ * yet in the Log. Deliberately independent of the change event: it also runs
+ * on workbook open, from the ribbon, and after each dialog entry, so a
+ * milestone filled by formula, pasted in, or entered while the add-in was
+ * asleep still gets picked up.
+ */
 async function runMilestoneSweep() {
   try {
     return await Excel.run(async (context) => {
@@ -564,7 +689,8 @@ async function runMilestoneSweep() {
       if (checksSheet.isNullObject) return { checked: 0, logged: 0, error: `"${MILESTONE_SHEET}" sheet not found.` };
       if (logSheet.isNullObject) return { checked: 0, logged: 0, error: `"${LOG_SHEET}" sheet not found.` };
 
-      const state = await loadMilestoneState(context);
+      const logHasEntries = (await findNextLogRow(context, logSheet)) > LOG_FIRST_DATA_ROW;
+      const state = await loadMilestoneState(context, logHasEntries);
 
       // Read every mapped cell in one round trip.
       const addresses = Object.keys(MILESTONE_MAP);
@@ -577,8 +703,7 @@ async function runMilestoneSweep() {
       // What's already in the Log, so nothing gets written twice. This reads
       // VALUES, not text: text is what the cell displays, and Excel clips that
       // to the column width, so a long Details string came back cut short and
-      // never matched the full string being compared against it - which is why
-      // the longer milestones logged again on every sweep.
+      // never matched the full string being compared against it.
       const detailsRange = logSheet.getRange(`E${LOG_FIRST_DATA_ROW}:E${LOG_MAX_ROW}`);
       detailsRange.load("values");
       await context.sync();
@@ -642,7 +767,13 @@ async function runMilestoneSweep() {
         let seconds = parseTimeToSeconds(cells[i].values[0][0]);
         if (seconds === null) seconds = parseTimeToSeconds(shown);
         const parsed = seconds !== null;
-        if (!parsed) seconds = nowSeconds();
+        if (!parsed) {
+          if (!LOG_NON_TIME_WITH_CLOCK) {
+            report.push(`${address}: "${seen}" is not a time, skipped`);
+            return;
+          }
+          seconds = nowSeconds();
+        }
 
         toLog.push({ address: address, mapping: mapping, details: details, seconds: seconds, parsed: parsed, seen: seen });
         already.add(key);
@@ -652,14 +783,15 @@ async function runMilestoneSweep() {
 
       // Second pass writes them, each slotted in by its own time.
       for (const entry of toLog) {
-        const row = await writeMilestoneRow(context, logSheet, entry.mapping, entry.seconds);
-        if (row === 0) {
-          report.push(`${entry.address}: Log is full`);
+        const placed = await writeMilestoneRow(context, logSheet, entry.mapping, entry.seconds);
+        if (placed.row === 0) {
+          report.push(`${entry.address}: ${placed.reason}`);
           continue;
         }
         report.push(
-          `${entry.address}: "${entry.seen}" -> row ${row} at ${secondsToClock(entry.seconds)}` +
-            (entry.parsed ? "" : " (no time found in the cell, used the clock)")
+          `${entry.address}: "${entry.seen}" -> row ${placed.row} at ${secondsToClock(entry.seconds)}` +
+            (entry.parsed ? "" : " (no time found in the cell, used the clock)") +
+            ` - ${placed.reason}`
         );
         logged++;
       }
@@ -711,14 +843,6 @@ async function findNextLogRow(context, logSheet) {
     if ((colText[i][0] || "").toString().trim() === "") return LOG_FIRST_DATA_ROW + i;
   }
   return LOG_MAX_ROW + 1;
-}
-
-function a1ToRowCol(address) {
-  const match = address.toUpperCase().match(/^([A-Z]+)(\d+)$/);
-  const row = parseInt(match[2], 10) - 1;
-  let col = 0;
-  for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
-  return { row, col: col - 1 };
 }
 
 /**
@@ -841,7 +965,8 @@ async function resetMilestoneLog(event) {
         if (signature !== "") filled++;
       });
 
-      const state = { logged: {}, baseline: baseline, available: true };
+      const eventStamp = await readEventStamp(context);
+      const state = { logged: {}, baseline: baseline, event: eventStamp, available: true };
       await saveMilestoneState(context, state);
 
       return (
@@ -1028,7 +1153,7 @@ async function readButtonRows() {
     const used = inputsSheet.getUsedRangeOrNullObject();
     used.load(["isNullObject", "values", "columnIndex"]);
     await context.sync();
-    if (used.isNullObject) return [];
+    if (used.isNullObject) return { rows: [], columns: "" };
 
     // Offset in case the used range doesn't start in column A.
     const off = used.columnIndex;
@@ -1138,26 +1263,7 @@ async function handleLogEntry(rawText) {
         return dictionary[key] !== undefined ? dictionary[key] : token;
       });
 
-      // --- Find the next empty row on Log ---
-      // Scans the DISPLAYED text in column A starting at LOG_FIRST_DATA_ROW,
-      // rather than raw values or the sheet's used range. A cell can look
-      // blank on screen while its underlying value isn't a true empty string
-      // (a stray space, or a template formula/format that hides a result) -
-      // .text reflects what's actually visible, matching what the row looks
-      // like to a person reading the sheet.
-      const scanRange = logSheet.getRange(`A${LOG_FIRST_DATA_ROW}:A${LOG_MAX_ROW}`);
-      scanRange.load("text");
-      await context.sync();
-
-      let nextRow = LOG_MAX_ROW + 1; // fallback if every scanned row is already filled
-      const colText = scanRange.text;
-      for (let i = 0; i < colText.length; i++) {
-        const cellText = (colText[i][0] || "").toString().trim();
-        if (cellText === "") {
-          nextRow = LOG_FIRST_DATA_ROW + i;
-          break;
-        }
-      }
+      const nextRow = await findNextLogRow(context, logSheet);
 
       // --- Write timestamp + the 4 resolved values ---
       const timeString = new Date().toLocaleTimeString("en-AU", {
