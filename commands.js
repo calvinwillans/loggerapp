@@ -101,17 +101,17 @@ const MILESTONE_MAP = {
   C74: { b: "Base", c: "All Call", d: "", e: "Start of main act/game" },
   C75: { b: "Base", c: "All Call", d: "", e: "Start of Intermission/Halftime" },
   D75: { b: "Base", c: "All Call", d: "", e: "End of Intermission/Halftime" },
-  C87: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
-  C105: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
-  C106: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
-  C107: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
-  C108: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
-  C109: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
-  C110: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
+  C88: { b: "Base", c: "All Call", d: "", e: "End of show/game. Prepare for egress" },
+  C107: { b: "Security", c: "Base", d: "", e: "Level 4 whitelevel checks completed" },
+  C108: { b: "Security", c: "Base", d: "", e: "Level 3 whitelevel checks completed" },
+  C109: { b: "Security", c: "Base", d: "", e: "Level 2 whitelevel checks completed" },
+  C1010: { b: "Security", c: "Base", d: "", e: "Level 1 whitelevel checks completed" },
+  C111: { b: "Security", c: "Base", d: "", e: "Ground floor whitelevel checks completed" },
+  C112: { b: "Base", c: "All Call", d: "", e: "Venue clear. Switch to non-event channels" },
   // Row 119 = "Handover of Channel 1 back to CRO and Base sign off", the last
   // step of the night. (Row 115 is "External Checks Started", which is why
   // this used to log as soon as external checks began.)
-  C119: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
+  C121: { b: "Security", c: "Base", d: "", e: "External checks complete. Channel 1 handover to CRO & EWIS back to auto" },
 };
 
 let dialog = null;
